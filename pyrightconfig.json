@@ -1,0 +1,23 @@
+{
+    "pythonVersion": "3.13",
+    "pythonPlatform": "Darwin",
+    "venvPath": "/Users/andimzhd/Documents/Svoyachello",
+    "venv": ".",
+    "include": [
+        "bot.py",
+        "database",
+        "messages",
+        "commands",
+        "game"
+    ],
+    "exclude": [
+        "lib",
+        "bin",
+        "include",
+        "**/__pycache__"
+    ],
+    "extraPaths": [
+        "/Users/andimzhd/Documents/Svoyachello",
+        "/Users/andimzhd/Documents/Svoyachello/lib/python3.13/site-packages"
+    ]
+}
