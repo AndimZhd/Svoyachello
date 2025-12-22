@@ -2,9 +2,7 @@ from aiogram import Router, types, F
 from aiogram.filters import Command
 
 from commands.common import send_game_info
-from database.games import get_game_by_chat_id, set_number_of_themes, set_pack, delete_all_games, delete_game
-from database.game_chats import release_all_game_chats, release_game_chat, get_game_by_game_chat
-from database.packs import get_pack_by_short_name, get_all_packs
+from database import games, game_chats, packs
 from game import stop_all_sessions, stop_game_session
 
 router = Router()
@@ -21,7 +19,7 @@ async def themes_command(message: types.Message) -> None:
     chat_id = message.chat.id
     
     # Get game for this chat
-    game = await get_game_by_chat_id(chat_id)
+    game = await games.get_game_by_chat_id(chat_id)
     if not game:
         await message.answer("В этом чате нет активной игры.")
         return
@@ -49,7 +47,7 @@ async def themes_command(message: types.Message) -> None:
         await message.answer("Укажите число.")
         return
     
-    await set_number_of_themes(chat_id, num)
+    await games.set_number_of_themes(chat_id, num)
     await send_game_info(message, chat_id)
 
 
@@ -64,7 +62,7 @@ async def pack_command(message: types.Message) -> None:
     chat_id = message.chat.id
     
     # Get game for this chat
-    game = await get_game_by_chat_id(chat_id)
+    game = await games.get_game_by_chat_id(chat_id)
     if not game:
         await message.answer("В этом чате нет активной игры.")
         return
@@ -78,12 +76,12 @@ async def pack_command(message: types.Message) -> None:
     args = message.text.split(maxsplit=1) if message.text else []
     if len(args) < 2:
         # Show available packs
-        packs = await get_all_packs()
-        if not packs:
+        all_packs = await packs.get_all_packs()
+        if not all_packs:
             await message.answer("Нет доступных паков.")
             return
         
-        pack_list = "\n".join([f"• {p['short_name']} - {p['name']}" for p in packs])
+        pack_list = "\n".join([f"• {p['short_name']} - {p['name']}" for p in all_packs])
         current = game['pack_short_name'] or "не выбран"
         await message.answer(
             f"Текущий пак: {current}\n\n"
@@ -95,12 +93,12 @@ async def pack_command(message: types.Message) -> None:
     pack_short_name = args[1].strip()
     
     # Validate pack exists
-    pack = await get_pack_by_short_name(pack_short_name)
+    pack = await packs.get_pack_by_short_name(pack_short_name)
     if not pack:
         await message.answer(f"Пак '{pack_short_name}' не найден.")
         return
     
-    await set_pack(chat_id, pack_short_name)
+    await games.set_pack(chat_id, pack_short_name)
     await send_game_info(message, chat_id)
 
 
@@ -108,14 +106,14 @@ async def pack_command(message: types.Message) -> None:
 @router.message(F.text.lower() == "паки ")
 async def pack_list_command(message: types.Message) -> None:
     """Show list of all available packs."""
-    packs = await get_all_packs()
+    all_packs = await packs.get_all_packs()
     
-    if not packs:
+    if not all_packs:
         await message.answer("Нет доступных паков.")
         return
     
     pack_lines = []
-    for p in packs:
+    for p in all_packs:
         pack_lines.append(f"<b>{p['short_name']}</b> — {p['name']} ({p['number_of_themes']} тем)")
     
     await message.answer(
@@ -130,11 +128,11 @@ async def abort_command(message: types.Message) -> None:
     chat_id = message.chat.id
     
     # Check if this is a game chat with a running game
-    game = await get_game_by_game_chat(chat_id)
+    game = await game_chats.get_game_by_game_chat(chat_id)
     
     # If not a game chat, check if it's a registration chat
     if not game:
-        game = await get_game_by_chat_id(chat_id)
+        game = await games.get_game_by_chat_id(chat_id)
     
     if not game:
         await message.answer("В этом чате нет активной игры.")
@@ -144,10 +142,10 @@ async def abort_command(message: types.Message) -> None:
     await stop_game_session(chat_id)
     
     # Release the game chat
-    await release_game_chat(game['id'])
+    await game_chats.release_game_chat(game['id'])
     
     # Delete the game
-    await delete_game(game['chat_id'])
+    await games.delete_game(game['chat_id'])
     
     await message.answer("🛑 Игра отменена.")
 
@@ -159,9 +157,9 @@ async def abort_all_command(message: types.Message) -> None:
     stop_all_sessions()
     
     # Release all game chats
-    await release_all_game_chats()
+    await game_chats.release_all_game_chats()
     
     # Delete all games
-    await delete_all_games()
+    await games.delete_all_games()
     
     await message.answer("🗑 Все игры удалены, все игровые чаты освобождены.")

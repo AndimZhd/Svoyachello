@@ -2,9 +2,7 @@ from aiogram import Bot, Router
 from aiogram.filters import ChatMemberUpdatedFilter, IS_NOT_MEMBER, IS_MEMBER
 from aiogram.types import ChatMemberUpdated
 
-from database.players import get_player_by_telegram_id, get_players_telegram_ids
-from database.games import update_game_status
-from database.game_chats import get_game_by_game_chat
+from database import players, games, game_chats
 from game import start_game_session
 from messages import msg_all_players_joined
 
@@ -22,17 +20,17 @@ async def on_player_joined(event: ChatMemberUpdated, bot: Bot) -> None:
         return
     
     # Get the game associated with this chat
-    game = await get_game_by_game_chat(chat_id)
+    game = await game_chats.get_game_by_game_chat(chat_id)
     if not game or game['status'] != 'starting':
         return
     
     # Get player info
-    db_player = await get_player_by_telegram_id(user.id)
+    db_player = await players.get_player_by_telegram_id(user.id)
     if not db_player or db_player['id'] not in game['players']:
         return  # Not a player of this game
     
     # Get all players' telegram_ids
-    players_info = await get_players_telegram_ids(game['players'])
+    players_info = await players.get_players_telegram_ids(game['players'])
     player_telegram_ids = {p['telegram_id'] for p in players_info}
     
     # Check which players are in the chat
@@ -47,7 +45,7 @@ async def on_player_joined(event: ChatMemberUpdated, bot: Bot) -> None:
     
     # If all players joined, start the game
     if joined_count == len(game['players']):
-        await update_game_status(game['chat_id'], 'running')
+        await games.update_game_status(game['chat_id'], 'running')
         await bot.send_message(chat_id, msg_all_players_joined())
         
         # Start the game state machine

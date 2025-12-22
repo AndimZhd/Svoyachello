@@ -109,15 +109,6 @@ async def cleanup_stale_games() -> list[int]:
         return [row['chat_id'] for row in rows]
 
 
-async def update_player_score(chat_id: int, player_id: UUID, points: int) -> None:
-    """Add points to a player's score."""
-    pool = Database.get_pool()
-    sql = Database.load_sql("games/update_player_score.sql")
-    
-    async with pool.acquire() as conn:
-        await conn.execute(sql, chat_id, str(player_id), points)
-
-
 async def bulk_update_player_scores(chat_id: int, score_changes: dict[UUID, int]) -> None:
     """Bulk update player scores in a single query.
     
@@ -148,15 +139,6 @@ async def bulk_update_player_scores(chat_id: int, score_changes: dict[UUID, int]
         
         # Update with the new scores in a single write
         await conn.execute(update_sql, chat_id, json.dumps(current_scores))
-
-
-async def set_player_score(chat_id: int, player_id: UUID, score: int) -> None:
-    """Set a player's score to a specific value."""
-    pool = Database.get_pool()
-    sql = Database.load_sql("games/set_player_score.sql")
-    
-    async with pool.acquire() as conn:
-        await conn.execute(sql, chat_id, str(player_id), score)
 
 
 async def get_game_scores(chat_id: int) -> dict:

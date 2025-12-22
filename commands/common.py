@@ -2,7 +2,7 @@ from aiogram import types
 
 from database.players import upsert_player
 from database.statistics import create_statistics
-from database.games import get_game_info, get_players_with_stats
+from database import games
 from messages import build_game_info_message
 
 
@@ -16,11 +16,11 @@ async def ensure_player_exists(user: types.User) -> dict:
 
 async def send_game_info(message: types.Message, chat_id: int) -> None:
     """Get game info and send it to the chat."""
-    game_info = await get_game_info(chat_id)
+    game_info = await games.get_game_info(chat_id)
     if not game_info:
         await message.answer("Ошибка получения информации об игре.")
         return
-    players = await get_players_with_stats(game_info['players'])
+    players = await games.get_players_with_stats(game_info['players'])
 
     await message.answer(
         build_game_info_message(

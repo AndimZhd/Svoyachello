@@ -6,37 +6,8 @@ from uuid import UUID
 
 from aiogram import Bot
 
-from database.games import (
-    get_game_by_chat_id,
-    get_current_position,
-    set_current_position,
-    update_game_status,
-    bulk_update_player_scores,
-    get_game_scores,
-    delete_game,
-)
-from database.game_chats import release_game_chat
-from database.packs import get_pack_by_short_name, update_player_pack_history
-from database.players import get_player_by_telegram_id, get_players_telegram_ids
-from database.statistics import (
-    get_statistics_by_player_id,
-    update_player_game_stats,
-    calculate_elo_changes,
-    create_statistics,
-)
-from messages import (
-    msg_pack_not_found,
-    msg_score_summary,
-    msg_current_scores,
-    msg_pack_info,
-    msg_theme_name,
-    msg_attention_question,
-    msg_question,
-    msg_answer,
-    msg_score_correction,
-    msg_game_over,
-    msg_error,
-)
+from database import games, game_chats, packs, players, statistics
+import messages
 
 
 class GameState(Enum):
@@ -96,21 +67,21 @@ _active_sessions: dict[int, GameSession] = {}
 async def start_game_session(game_chat_id: int, origin_chat_id: int, bot: Bot) -> None:
     """Start a new game session when all players have joined."""
     # Get game info (game is now stored under game_chat_id after transfer)
-    game = await get_game_by_chat_id(game_chat_id)
+    game = await games.get_game_by_chat_id(game_chat_id)
     if not game:
         return
     
     # Get pack info
-    pack = await get_pack_by_short_name(game['pack_short_name'])
+    pack = await packs.get_pack_by_short_name(game['pack_short_name'])
     if not pack:
-        await bot.send_message(game_chat_id, msg_pack_not_found())
+        await bot.send_message(game_chat_id, messages.msg_pack_not_found())
         return
     
     print(f"Game: {game}")
     
     # Get current position (in case of resume)
     # Game is now stored under game_chat_id after transfer
-    position = await get_current_position(game_chat_id)
+    position = await games.get_current_position(game_chat_id)
     theme_idx = position.get('theme', 0) if isinstance(position, dict) else 0
     question_idx = position.get('question', 0) if isinstance(position, dict) else 0
 
@@ -367,11 +338,15 @@ async def finalize_question_scores(session: GameSession, cost: int, bot: Bot) ->
     if not session.answered_players:
         return
     
+    # Bulk fetch all players who answered
+    telegram_ids = list(session.answered_players.keys())
+    players_by_telegram_id = await players.get_players_by_telegram_ids(telegram_ids)
+    
     score_changes: dict[UUID, int] = {}
     score_messages = []
     
     for telegram_id, answer_state in session.answered_players.items():
-        player = await get_player_by_telegram_id(telegram_id)
+        player = players_by_telegram_id.get(telegram_id)
         if not player:
             continue
         
@@ -393,19 +368,19 @@ async def finalize_question_scores(session: GameSession, cost: int, bot: Bot) ->
     
     # Single bulk update for all score changes
     if score_changes:
-        await bulk_update_player_scores(session.game_chat_id, score_changes)
+        await games.bulk_update_player_scores(session.game_chat_id, score_changes)
     
     if score_messages:
         await bot.send_message(
             session.game_chat_id,
-            msg_score_summary(score_messages)
+            messages.msg_score_summary(score_messages)
         )
 
 
 async def show_current_scores(session: GameSession, bot: Bot) -> None:
     """Show current scores for all players."""
-    scores = await get_game_scores(session.game_chat_id)
-    players_info = await get_players_telegram_ids(session.players)
+    scores = await games.get_game_scores(session.game_chat_id)
+    players_info = await players.get_players_telegram_ids(session.players)
     
     # Build UUID to name map (use full name: first_name + last_name)
     uuid_to_name: dict[str, str] = {}
@@ -431,7 +406,7 @@ async def show_current_scores(session: GameSession, bot: Bot) -> None:
     if score_lines:
         await bot.send_message(
             session.game_chat_id,
-            msg_current_scores([line for _, line in score_lines])
+            messages.msg_current_scores([line for _, line in score_lines])
         )
 
 
@@ -447,15 +422,15 @@ async def finalize_game(session: GameSession, bot: Bot) -> None:
     game_chat_id = session.game_chat_id
     
     # Get final scores
-    scores = await get_game_scores(game_chat_id)
+    scores = await games.get_game_scores(game_chat_id)
     
     # Get game info for game ID
-    game = await get_game_by_chat_id(game_chat_id)
+    game = await games.get_game_by_chat_id(game_chat_id)
     if not game:
         return
     
     # Get player info (telegram_id, username) for all players
-    players_info = await get_players_telegram_ids(session.players)
+    players_info = await players.get_players_telegram_ids(session.players)
     uuid_to_info: dict[str, dict] = {}
     for i, player_uuid in enumerate(session.players):
         if i < len(players_info):
@@ -490,16 +465,16 @@ async def finalize_game(session: GameSession, bot: Bot) -> None:
     # Get current ELO ratings for all players
     player_ratings: dict[UUID, int] = {}
     for player_uuid in session.players:
-        stats = await get_statistics_by_player_id(player_uuid)
+        stats = await statistics.get_statistics_by_player_id(player_uuid)
         if stats:
             player_ratings[player_uuid] = stats.get('elo_rating', 1000)
         else:
             # Create statistics if not exists
-            await create_statistics(player_uuid)
+            await statistics.create_statistics(player_uuid)
             player_ratings[player_uuid] = 1000
     
     # Calculate ELO changes
-    elo_changes = calculate_elo_changes(player_ratings, player_scores)
+    elo_changes = statistics.calculate_elo_changes(player_ratings, player_scores)
     
     # Update statistics for each player
     for player_uuid in session.players:
@@ -521,7 +496,7 @@ async def finalize_game(session: GameSession, bot: Bot) -> None:
             if session.player_abs_scores:
                 abs_score = session.player_abs_scores.get(telegram_id, 0)
         
-        await update_player_game_stats(
+        await statistics.update_player_game_stats(
             player_id=player_uuid,
             game_score=game_score,
             is_winner=is_winner,
@@ -577,14 +552,14 @@ async def finalize_game(session: GameSession, bot: Bot) -> None:
                 pass  # Player might have already left or bot lacks permissions
     
     # Update player pack history with played themes
-    pack = await get_pack_by_short_name(game['pack_short_name'])
+    pack = await packs.get_pack_by_short_name(game['pack_short_name'])
     if pack:
         for player_uuid in session.players:
-            await update_player_pack_history(player_uuid, pack['id'], session.pack_themes)
+            await packs.update_player_pack_history(player_uuid, pack['id'], session.pack_themes)
     
     # Release game chat and delete game
-    await release_game_chat(game['id'])
-    await delete_game(game_chat_id)
+    await game_chats.release_game_chat(game['id'])
+    await games.delete_game(game_chat_id)
 
 
 async def game_loop(session: GameSession, bot: Bot) -> None:
@@ -598,7 +573,7 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
         if pack_info and session.current_theme_idx == 0 and session.current_question_idx == 0:
             await bot.send_message(
                 session.game_chat_id,
-                msg_pack_info(pack_info),
+                messages.msg_pack_info(pack_info),
                 parse_mode="HTML"
             )
             await wait_with_pause(session, 3)
@@ -621,7 +596,7 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
             session.state = GameState.SHOWING_THEME
             await bot.send_message(
                 session.game_chat_id,
-                msg_theme_name(theme_name),
+                messages.msg_theme_name(theme_name),
                 parse_mode="HTML"
             )
             await wait_with_pause(session, 7)
@@ -633,12 +608,12 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
                 question = questions[question_idx]
                 
                 # Save position
-                await set_current_position(session.game_chat_id, theme_idx, question_idx)
+                await games.set_current_position(session.game_chat_id, theme_idx, question_idx)
                 session.current_theme_idx = theme_idx
                 session.current_question_idx = question_idx
                 
                 # Announce question
-                await bot.send_message(session.game_chat_id, msg_attention_question())
+                await bot.send_message(session.game_chat_id, messages.msg_attention_question())
                 await wait_with_pause(session, 1.5)
                 
                 # Show question
@@ -652,7 +627,7 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
                 # Send the question
                 question_msg = await bot.send_message(
                     session.game_chat_id,
-                    msg_question(cost, short_theme_name, question_text),
+                    messages.msg_question(cost, short_theme_name, question_text),
                     parse_mode="HTML"
                 )
                 
@@ -675,14 +650,14 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
                 answer_text = question.get('answer', '')
                 comment = question.get('comment', '')
                 
-                await bot.send_message(session.game_chat_id, msg_answer(answer_text, comment))
+                await bot.send_message(session.game_chat_id, messages.msg_answer(answer_text, comment))
                 
                 # Score correction phase (5 seconds)
                 if session.answered_players:
                     session.state = GameState.SCORE_CORRECTION
                     await bot.send_message(
                         session.game_chat_id,
-                        msg_score_correction()
+                        messages.msg_score_correction()
                     )
                     await wait_with_pause(session, 10)
                     
@@ -709,8 +684,8 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
         
         # Game over
         session.state = GameState.GAME_OVER
-        await bot.send_message(session.game_chat_id, msg_game_over())
-        await update_game_status(session.game_chat_id, 'finished')
+        await bot.send_message(session.game_chat_id, messages.msg_game_over())
+        await games.update_game_status(session.game_chat_id, 'finished')
         
         # Finalize game: calculate ELO, update stats, kick players, cleanup
         await finalize_game(session, bot)
@@ -723,6 +698,6 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
         # Game was stopped
         raise
     except Exception as e:
-        await bot.send_message(session.game_chat_id, msg_error(str(e)))
+        await bot.send_message(session.game_chat_id, messages.msg_error(str(e)))
         session.state = GameState.IDLE
 

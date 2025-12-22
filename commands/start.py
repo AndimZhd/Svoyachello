@@ -4,10 +4,7 @@ from aiogram import Bot, Router, types, F
 from aiogram.filters import Command
 from aiogram.types import BotCommand, BotCommandScopeChat
 
-from database.games import get_game_by_chat_id, update_game_status, assign_pack_to_game, set_game_chat_id
-from database.game_chats import get_available_game_chat, assign_game_to_chat
-from database.players import get_players_telegram_ids
-from database.packs import get_available_packs_for_players
+from database import games, game_chats, players, packs
 
 # Game chat specific commands
 GAME_CHAT_COMMANDS = [
@@ -32,7 +29,7 @@ async def start_game(message: types.Message, bot: Bot) -> None:
     chat_id = message.chat.id
 
     # Get game for this chat
-    game = await get_game_by_chat_id(chat_id)
+    game = await games.get_game_by_chat_id(chat_id)
     if not game:
         return
 
@@ -43,7 +40,7 @@ async def start_game(message: types.Message, bot: Bot) -> None:
 
     # Get available packs for all players
     themes_needed = game['number_of_themes']
-    available_packs = await get_available_packs_for_players(game['players'], themes_needed)
+    available_packs = await packs.get_available_packs_for_players(game['players'], themes_needed)
     
     if not available_packs:
         await message.answer("Нет доступных паков с достаточным количеством тем для всех игроков.")
@@ -57,10 +54,10 @@ async def start_game(message: types.Message, bot: Bot) -> None:
     #selected_themes.sort()
     
     # Assign pack and themes to game
-    await assign_pack_to_game(chat_id, selected_pack.short_name, selected_themes)
+    await games.assign_pack_to_game(chat_id, selected_pack.short_name, selected_themes)
 
     # Get an available game chat
-    game_chat = await get_available_game_chat()
+    game_chat = await game_chats.get_available_game_chat()
     if not game_chat:
         await message.answer("Нет доступных чатов для игры. Попробуйте позже.")
         return
@@ -76,11 +73,11 @@ async def start_game(message: types.Message, bot: Bot) -> None:
         return
 
     # Assign game to the chat
-    await assign_game_to_chat(game_chat['id'], game['id'])
+    await game_chats.assign_game_to_chat(game_chat['id'], game['id'])
     
     # Transfer game to game chat
     game_chat_id = game_chat['chat_id']
-    await set_game_chat_id(chat_id, game_chat_id)
+    await games.set_game_chat_id(chat_id, game_chat_id)
     
     # Set game-specific commands for the game chat
     try:
@@ -92,10 +89,10 @@ async def start_game(message: types.Message, bot: Bot) -> None:
         pass  # Commands may fail if bot doesn't have permission
     
     # Update game status
-    await update_game_status(game_chat_id, 'starting')
+    await games.update_game_status(game_chat_id, 'starting')
 
     # Get player telegram_ids for tagging
-    players_info = await get_players_telegram_ids(game['players'])
+    players_info = await players.get_players_telegram_ids(game['players'])
     
     # Build player mentions
     mentions = []
