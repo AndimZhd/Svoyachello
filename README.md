@@ -151,4 +151,4 @@ The parser expects packs in this format:
 
 ## License
 
-MIT
+Huyaicense
