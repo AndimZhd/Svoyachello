@@ -3,14 +3,14 @@ from uuid import UUID
 from database.connection import Database
 
 
-async def upsert_player(telegram_id: int, username: str | None) -> UUID:
-    """Insert or update a player. Returns the player's UUID."""
+async def upsert_player(telegram_id: int, username: str | None, first_name: str | None, last_name: str | None) -> dict:
+    """Insert or update a player. Returns the player record."""
     pool = Database.get_pool()
     sql = Database.load_sql("players/upsert_player.sql")
     
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(sql, telegram_id, username)
-        return row['id']
+        row = await conn.fetchrow(sql, telegram_id, username, first_name, last_name)
+        return dict(row)
 
 
 async def get_player_by_telegram_id(telegram_id: int) -> dict | None:

@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS player (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     telegram_id BIGINT UNIQUE NOT NULL,
     username VARCHAR(255),
+    first_name VARCHAR(255),
+    last_name VARCHAR(255),
     created_at TIMESTAMP DEFAULT NOW()
 );
 

@@ -23,7 +23,7 @@ router = Router()
 
 
 @router.message(Command("start"))
-@router.message(F.text == "старт")
+@router.message(F.text.lower() == "старт")
 async def start_game(message: types.Message, bot: Bot) -> None:
     """Start the game - assign a pack and game chat, send invite link and tag players."""
     user = message.from_user

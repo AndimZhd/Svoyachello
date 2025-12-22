@@ -1,4 +1,5 @@
 import asyncio
+import unicodedata
 from enum import Enum
 from dataclasses import dataclass
 from uuid import UUID
@@ -11,9 +12,18 @@ from database.games import (
     set_current_position,
     update_game_status,
     bulk_update_player_scores,
+    get_game_scores,
+    delete_game,
 )
-from database.packs import get_pack_by_short_name
-from database.players import get_player_by_telegram_id
+from database.game_chats import release_game_chat
+from database.packs import get_pack_by_short_name, update_player_pack_history
+from database.players import get_player_by_telegram_id, get_players_telegram_ids
+from database.statistics import (
+    get_statistics_by_player_id,
+    update_player_game_stats,
+    calculate_elo_changes,
+    create_statistics,
+)
 from messages import (
     msg_pack_not_found,
     msg_score_summary,
@@ -73,6 +83,10 @@ class GameSession:
     # Score correction
     answered_players: dict[int, AnswerState] | None = None  # {telegram_id: AnswerState}
     question_claimed: bool = False  # True if someone pressed /yes (question is claimed)
+    # Answer statistics per player (telegram_id -> count)
+    player_correct_answers: dict[int, int] | None = None
+    player_wrong_answers: dict[int, int] | None = None
+    player_abs_scores: dict[int, int] | None = None  # Sum of correct answer costs only
 
 
 # Active game sessions
@@ -121,6 +135,9 @@ async def start_game_session(game_chat_id: int, origin_chat_id: int, bot: Bot) -
         current_question_idx=question_idx,
         pause_event=pause_event,
         answer_event=answer_event,
+        player_correct_answers={},
+        player_wrong_answers={},
+        player_abs_scores={},
     )
 
     print(f"Session: {session}")
@@ -269,14 +286,50 @@ def submit_answer(game_chat_id: int, player_telegram_id: int, answer_text: str) 
     if not session.current_question_data:
         return None
     
-    # Validate answer
-    correct_answer = session.current_question_data.get('answer', '').lower().strip()
-    user_answer = answer_text.lower().strip()
+    # Validate answer - normalize to remove accents
+    def normalize_text(text: str) -> str:
+        """Remove accents and normalize text for comparison."""
+        # NFD decomposes characters into base + combining marks
+        # Then filter out combining marks (category 'Mn' = Mark, Nonspacing)
+        normalized = unicodedata.normalize('NFD', text)
+        return ''.join(c for c in normalized if unicodedata.category(c) != 'Mn').lower().strip()
     
-    # Check if answer matches (simple contains check for now)
+    def remove_brackets(text: str) -> str:
+        """Remove content in brackets [] and () including the brackets."""
+        import re
+        text = re.sub(r'\([^)]*\)', '', text)  # Remove (...)
+        text = re.sub(r'\[[^\]]*\]', '', text)  # Remove [...]
+        return text.strip()
+    
+    def answers_match(user: str, correct: str) -> bool:
+        """Check if user answer matches correct answer, with or without brackets."""
+        # Normalize both
+        user_norm = normalize_text(user)
+        correct_norm = normalize_text(correct)
+        
+        # Also prepare versions without brackets
+        user_no_brackets = normalize_text(remove_brackets(user))
+        correct_no_brackets = normalize_text(remove_brackets(correct))
+        
+        # Check all combinations
+        combinations = [
+            (user_norm, correct_norm),
+            (user_no_brackets, correct_norm),
+            (user_norm, correct_no_brackets),
+            (user_no_brackets, correct_no_brackets),
+        ]
+        
+        for u, c in combinations:
+            if u and c and (u in c or c in u):
+                return True
+        return False
+    
+    raw_correct = session.current_question_data.get('answer', '')
+    
+    # Check if answer matches
     # Handle format "answer1/answer2" for multiple accepted answers
-    accepted_answers = [a.strip() for a in correct_answer.split('/')]
-    is_correct = any(user_answer in a or a in user_answer for a in accepted_answers if a)
+    accepted_answers = [a.strip() for a in raw_correct.split('/')]
+    is_correct = any(answers_match(answer_text, a) for a in accepted_answers if a)
     
     session.answer_correct = is_correct
     
@@ -325,9 +378,17 @@ async def finalize_question_scores(session: GameSession, cost: int, bot: Bot) ->
         if answer_state == AnswerState.CORRECT:
             score_changes[player['id']] = cost
             score_messages.append(f"✅ +{cost}")
+            # Track correct answer and abs_score
+            if session.player_correct_answers is not None:
+                session.player_correct_answers[telegram_id] = session.player_correct_answers.get(telegram_id, 0) + 1
+            if session.player_abs_scores is not None:
+                session.player_abs_scores[telegram_id] = session.player_abs_scores.get(telegram_id, 0) + cost
         elif answer_state == AnswerState.INCORRECT:
             score_changes[player['id']] = -cost
             score_messages.append(f"❌ -{cost}")
+            # Track wrong answer
+            if session.player_wrong_answers is not None:
+                session.player_wrong_answers[telegram_id] = session.player_wrong_answers.get(telegram_id, 0) + 1
         # DOESNT_COUNT and CONFIRMED_DOESNT_COUNT = no score change
     
     # Single bulk update for all score changes
@@ -343,17 +404,18 @@ async def finalize_question_scores(session: GameSession, cost: int, bot: Bot) ->
 
 async def show_current_scores(session: GameSession, bot: Bot) -> None:
     """Show current scores for all players."""
-    from database.games import get_game_scores
-    from database.players import get_players_telegram_ids
-    
     scores = await get_game_scores(session.game_chat_id)
     players_info = await get_players_telegram_ids(session.players)
     
-    # Build UUID to username map
+    # Build UUID to name map (use full name: first_name + last_name)
     uuid_to_name: dict[str, str] = {}
     for i, player_uuid in enumerate(session.players):
         if i < len(players_info):
-            uuid_to_name[str(player_uuid)] = players_info[i].get('username') or "Игрок"
+            info = players_info[i]
+            first = info.get('first_name') or ''
+            last = info.get('last_name') or ''
+            full_name = f"{first} {last}".strip()
+            uuid_to_name[str(player_uuid)] = full_name or info.get('username') or "Игрок"
     
     # Build score display sorted by score descending
     score_lines = []
@@ -361,7 +423,7 @@ async def show_current_scores(session: GameSession, bot: Bot) -> None:
         uuid_str = str(player_uuid)
         score = int(scores.get(uuid_str, 0))
         name = uuid_to_name.get(uuid_str, "Игрок")
-        score_lines.append((score, f"@{name}: {score}"))
+        score_lines.append((score, f"{name}: {score}"))
     
     # Sort by score descending
     score_lines.sort(key=lambda x: x[0], reverse=True)
@@ -371,6 +433,158 @@ async def show_current_scores(session: GameSession, bot: Bot) -> None:
             session.game_chat_id,
             msg_current_scores([line for _, line in score_lines])
         )
+
+
+async def finalize_game(session: GameSession, bot: Bot) -> None:
+    """
+    Finalize the game after it ends:
+    1. Calculate final scores and determine winner
+    2. Calculate ELO changes for all players
+    3. Update player statistics
+    4. Kick all players from the game chat
+    5. Release the game chat and delete the game
+    """
+    game_chat_id = session.game_chat_id
+    
+    # Get final scores
+    scores = await get_game_scores(game_chat_id)
+    
+    # Get game info for game ID
+    game = await get_game_by_chat_id(game_chat_id)
+    if not game:
+        return
+    
+    # Get player info (telegram_id, username) for all players
+    players_info = await get_players_telegram_ids(session.players)
+    uuid_to_info: dict[str, dict] = {}
+    for i, player_uuid in enumerate(session.players):
+        if i < len(players_info):
+            uuid_to_info[str(player_uuid)] = players_info[i]
+    
+    # Build player scores and abs_scores as {UUID: score}
+    player_scores: dict[UUID, int] = {}
+    player_abs_scores: dict[UUID, int] = {}
+    for player_uuid in session.players:
+        uuid_str = str(player_uuid)
+        player_scores[player_uuid] = int(scores.get(uuid_str, 0))
+        
+        # Get abs_score using telegram_id
+        info = uuid_to_info.get(uuid_str, {})
+        telegram_id = info.get('telegram_id')
+        if telegram_id and session.player_abs_scores:
+            player_abs_scores[player_uuid] = session.player_abs_scores.get(telegram_id, 0)
+        else:
+            player_abs_scores[player_uuid] = 0
+    
+    # Sort players by game_score, then by abs_score (both descending) for tiebreaking
+    sorted_players = sorted(
+        session.players,
+        key=lambda pid: (player_scores.get(pid, 0), player_abs_scores.get(pid, 0)),
+        reverse=True
+    )
+    
+    # Determine winners - top half of players (at least 1)
+    num_winners = max(1, len(session.players) // 2)
+    winners = set(sorted_players[:num_winners])
+    
+    # Get current ELO ratings for all players
+    player_ratings: dict[UUID, int] = {}
+    for player_uuid in session.players:
+        stats = await get_statistics_by_player_id(player_uuid)
+        if stats:
+            player_ratings[player_uuid] = stats.get('elo_rating', 1000)
+        else:
+            # Create statistics if not exists
+            await create_statistics(player_uuid)
+            player_ratings[player_uuid] = 1000
+    
+    # Calculate ELO changes
+    elo_changes = calculate_elo_changes(player_ratings, player_scores)
+    
+    # Update statistics for each player
+    for player_uuid in session.players:
+        is_winner = player_uuid in winners
+        game_score = player_scores.get(player_uuid, 0)
+        elo_change = elo_changes.get(player_uuid, 0)
+        
+        # Get answer counts and abs_score using telegram_id
+        info = uuid_to_info.get(str(player_uuid), {})
+        telegram_id = info.get('telegram_id')
+        correct_answers = 0
+        wrong_answers = 0
+        abs_score = 0
+        if telegram_id:
+            if session.player_correct_answers:
+                correct_answers = session.player_correct_answers.get(telegram_id, 0)
+            if session.player_wrong_answers:
+                wrong_answers = session.player_wrong_answers.get(telegram_id, 0)
+            if session.player_abs_scores:
+                abs_score = session.player_abs_scores.get(telegram_id, 0)
+        
+        await update_player_game_stats(
+            player_id=player_uuid,
+            game_score=game_score,
+            is_winner=is_winner,
+            correct_answers=correct_answers,
+            wrong_answers=wrong_answers,
+            abs_score=abs_score,
+            elo_change=elo_change
+        )
+    
+    result_lines = []
+    for i, player_uuid in enumerate(sorted_players):
+        info = uuid_to_info.get(str(player_uuid), {})
+        first = info.get('first_name') or ''
+        last = info.get('last_name') or ''
+        name = f"{first} {last}".strip() or info.get('username') or 'Игрок'
+        score = player_scores.get(player_uuid, 0)
+        elo_change = elo_changes.get(player_uuid, 0)
+        new_elo = player_ratings.get(player_uuid, 1000) + elo_change
+        
+        # Format ELO change
+        elo_str = f"+{elo_change}" if elo_change >= 0 else str(elo_change)
+        
+        # Medal for top 3
+        medal = ""
+        if i == 0:
+            medal = "🥇 "
+        elif i == 1:
+            medal = "🥈 "
+        elif i == 2:
+            medal = "🥉 "
+        
+        result_lines.append(f"{medal}{name}: {score} очков (ELO: {new_elo} {elo_str})")
+    
+    results_message = "📊 <b>Итоги игры:</b>\n\n" + "\n".join(result_lines)
+    
+    await bot.send_message(game_chat_id, results_message, parse_mode="HTML")
+    
+    # Also send results to the origin chat where the game was registered
+    if session.origin_chat_id != game_chat_id:
+        try:
+            await bot.send_message(session.origin_chat_id, results_message, parse_mode="HTML")
+        except Exception:
+            pass  # Origin chat might be unavailable
+    
+    # Kick all players from the game chat
+    for player_info in players_info:
+        telegram_id = player_info.get('telegram_id')
+        if telegram_id:
+            try:
+                await bot.ban_chat_member(game_chat_id, telegram_id)
+                await bot.unban_chat_member(game_chat_id, telegram_id)  # Unban so they can rejoin later
+            except Exception:
+                pass  # Player might have already left or bot lacks permissions
+    
+    # Update player pack history with played themes
+    pack = await get_pack_by_short_name(game['pack_short_name'])
+    if pack:
+        for player_uuid in session.players:
+            await update_player_pack_history(player_uuid, pack['id'], session.pack_themes)
+    
+    # Release game chat and delete game
+    await release_game_chat(game['id'])
+    await delete_game(game_chat_id)
 
 
 async def game_loop(session: GameSession, bot: Bot) -> None:
@@ -410,7 +624,7 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
                 msg_theme_name(theme_name),
                 parse_mode="HTML"
             )
-            await wait_with_pause(session, 2)
+            await wait_with_pause(session, 7)
             
             questions = theme.get('questions', [])
             question_idx = session.current_question_idx if theme_idx == session.current_theme_idx else 0
@@ -425,7 +639,7 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
                 
                 # Announce question
                 await bot.send_message(session.game_chat_id, msg_attention_question())
-                await wait_with_pause(session, 1)
+                await wait_with_pause(session, 1.5)
                 
                 # Show question
                 session.state = GameState.SHOWING_QUESTION
@@ -435,6 +649,7 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
                 # Get short theme name (without author)
                 short_theme_name = theme.get('name', f'Тема {theme_idx + 1}')
                 
+                # Send the question
                 question_msg = await bot.send_message(
                     session.game_chat_id,
                     msg_question(cost, short_theme_name, question_text),
@@ -451,9 +666,9 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
                 if session.answer_event:
                     session.answer_event.clear()
                 
-                # Wait for answer (20 seconds) or player pressing /answer
+                # Wait for answer (20 seconds)
                 session.state = GameState.WAITING_ANSWER
-                answered = await wait_for_answer_or_timeout(session, 20)
+                answered = await wait_for_answer_or_timeout(session, 20.0)
                 
                 # Show answer
                 session.state = GameState.SHOWING_ANSWER
@@ -469,7 +684,7 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
                         session.game_chat_id,
                         msg_score_correction()
                     )
-                    await wait_with_pause(session, 5)
+                    await wait_with_pause(session, 10)
                     
                     # Finalize scores based on final answer states
                     await finalize_question_scores(session, cost, bot)
@@ -497,7 +712,10 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
         await bot.send_message(session.game_chat_id, msg_game_over())
         await update_game_status(session.game_chat_id, 'finished')
         
-        # Clean up
+        # Finalize game: calculate ELO, update stats, kick players, cleanup
+        await finalize_game(session, bot)
+        
+        # Clean up session
         if session.game_chat_id in _active_sessions:
             del _active_sessions[session.game_chat_id]
             

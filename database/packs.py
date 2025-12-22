@@ -84,6 +84,52 @@ async def get_player_pack_histories(player_ids: list) -> list[dict]:
         return [dict(row) for row in rows]
 
 
+def format_themes_as_ranges(themes: list[int]) -> str:
+    """Format theme indices as ranges. E.g., [0,1,2,5,6] -> '0-2,5-6'."""
+    if not themes:
+        return ''
+    
+    sorted_themes = sorted(themes)
+    ranges = []
+    start = sorted_themes[0]
+    end = sorted_themes[0]
+    
+    for t in sorted_themes[1:]:
+        if t == end + 1:
+            end = t
+        else:
+            # Save current range
+            if start == end:
+                ranges.append(str(start))
+            else:
+                ranges.append(f"{start}-{end}")
+            start = t
+            end = t
+    
+    # Save last range
+    if start == end:
+        ranges.append(str(start))
+    else:
+        ranges.append(f"{start}-{end}")
+    
+    return ','.join(ranges)
+
+
+async def update_player_pack_history(player_id: UUID, pack_id: UUID, themes_played: list[int]) -> None:
+    """Update player's pack history with newly played themes."""
+    if not themes_played:
+        return
+    
+    # Convert theme indices to range string (e.g., "0-2,5-6")
+    themes_str = format_themes_as_ranges(themes_played)
+    
+    pool = Database.get_pool()
+    sql = Database.load_sql("packs/upsert_player_pack_history.sql")
+    
+    async with pool.acquire() as conn:
+        await conn.execute(sql, player_id, pack_id, themes_str)
+
+
 def parse_themes_played(themes_str: str) -> set[int]:
     """Parse themes_played string like '1-5, 10-11' into a set of integers."""
     if not themes_str or not themes_str.strip():

@@ -8,8 +8,8 @@ router = Router()
 
 
 @router.message(Command("pause"))
-@router.message(F.text == "пауза")
-@router.message(F.text == "стоямба")
+@router.message(F.text.lower() == "пауза")
+@router.message(F.text.lower() == "стоямба")
 async def pause_game(message: types.Message) -> None:
     """Pause the current game."""
     chat_id = message.chat.id
@@ -35,8 +35,7 @@ async def pause_game(message: types.Message) -> None:
 
 
 @router.message(Command("resume"))
-@router.message(F.text == "продолжить")
-@router.message(F.text == "го")
+@router.message(F.text.lower() == "продолжить")
 async def resume_game(message: types.Message) -> None:
     """Resume a paused game."""
     chat_id = message.chat.id

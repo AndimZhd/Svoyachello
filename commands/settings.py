@@ -2,10 +2,10 @@ from aiogram import Router, types, F
 from aiogram.filters import Command
 
 from commands.common import send_game_info
-from database.games import get_game_by_chat_id, set_number_of_themes, set_pack, delete_all_games
-from database.game_chats import release_all_game_chats
+from database.games import get_game_by_chat_id, set_number_of_themes, set_pack, delete_all_games, delete_game
+from database.game_chats import release_all_game_chats, release_game_chat, get_game_by_game_chat
 from database.packs import get_pack_by_short_name, get_all_packs
-from game import stop_all_sessions
+from game import stop_all_sessions, stop_game_session
 
 router = Router()
 
@@ -54,7 +54,7 @@ async def themes_command(message: types.Message) -> None:
 
 
 @router.message(Command("pack"))
-@router.message(F.text.func(lambda t: t.lower().startswith("пак") if t else False))
+@router.message(F.text.func(lambda t: t.lower().startswith("пак ") if t else False))
 async def pack_command(message: types.Message) -> None:
     """Set pack for the current game."""
     user = message.from_user
@@ -105,7 +105,7 @@ async def pack_command(message: types.Message) -> None:
 
 
 @router.message(Command("pack_list"))
-@router.message(F.text == "паки")
+@router.message(F.text.lower() == "паки ")
 async def pack_list_command(message: types.Message) -> None:
     """Show list of all available packs."""
     packs = await get_all_packs()
@@ -122,6 +122,34 @@ async def pack_list_command(message: types.Message) -> None:
         "📦 <b>Доступные паки:</b>\n\n" + "\n".join(pack_lines),
         parse_mode="HTML"
     )
+
+
+@router.message(Command("abort"))
+async def abort_command(message: types.Message) -> None:
+    """End the current game in this chat."""
+    chat_id = message.chat.id
+    
+    # Check if this is a game chat with a running game
+    game = await get_game_by_game_chat(chat_id)
+    
+    # If not a game chat, check if it's a registration chat
+    if not game:
+        game = await get_game_by_chat_id(chat_id)
+    
+    if not game:
+        await message.answer("В этом чате нет активной игры.")
+        return
+    
+    # Stop the game session if running
+    await stop_game_session(chat_id)
+    
+    # Release the game chat
+    await release_game_chat(game['id'])
+    
+    # Delete the game
+    await delete_game(game['chat_id'])
+    
+    await message.answer("🛑 Игра отменена.")
 
 
 @router.message(Command("abort_all"))

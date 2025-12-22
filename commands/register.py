@@ -9,7 +9,7 @@ router = Router()
 
 @router.message(Command("register"))
 @router.message(F.text == "++")
-@router.message(F.text == "го")
+@router.message(F.text.lower() == "го")
 async def register(message: types.Message) -> None:
     """Register player for the game in current chat."""
     user = message.from_user
@@ -39,7 +39,7 @@ async def register(message: types.Message) -> None:
 
 @router.message(Command("unregister"))
 @router.message(F.text == "-")
-@router.message(F.text == "не го")
+@router.message(F.text.lower() == "не го")
 async def unregister(message: types.Message) -> None:
     """Unregister player from the game in current chat."""
     user = message.from_user
