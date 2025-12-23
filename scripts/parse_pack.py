@@ -30,7 +30,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 try:
     import fitz  # PyMuPDF
 except ImportError:
-    print("Error: PyMuPDF is required. Install it with: pip install PyMuPDF")
     sys.exit(1)
 
 from database import Database
@@ -286,68 +285,38 @@ Example:
     
     # Check if file exists
     if not os.path.exists(args.pdf_path):
-        print(f"Error: File not found: {args.pdf_path}")
         sys.exit(1)
-    
-    print(f"Parsing PDF: {args.pdf_path}")
     
     # Extract structured text from PDF
     segments = extract_structured_text(args.pdf_path)
     
     if not segments:
-        print("Error: No text extracted from PDF")
         sys.exit(1)
-    
-    print(f"Extracted {len(segments)} text segments")
-    
-    if args.debug:
-        print("\n--- Segments ---")
-        for i, seg in enumerate(segments[:50]):  # First 50 segments
-            bold_marker = "[BOLD]" if seg['is_bold'] else "      "
-            print(f"{i:3}: {bold_marker} {seg['text'][:80]}")
-        if len(segments) > 50:
-            print(f"... and {len(segments) - 50} more segments")
-        print()
     
     # Parse the content
     pack_file = parse_pack_from_segments(segments)
     number_of_themes = len(pack_file['themes'])
     
-    print(pack_file)
-    print(f"Found {number_of_themes} themes")
-    for i, theme in enumerate(pack_file['themes'], 1):
-        print(f"  {i}. {theme['name']} ({len(theme['questions'])} questions)")
-    
     # Output or save
     if args.output:
         with open(args.output, 'w', encoding='utf-8') as f:
             json.dump(pack_file, f, ensure_ascii=False, indent=2)
-        print(f"\nSaved to: {args.output}")
         return
     
     if args.dry_run:
-        print("\n--- Pack JSON ---")
-        print(json.dumps(pack_file, ensure_ascii=False, indent=2))
         return
     
     # Insert into database
-    print("\nConnecting to database...")
     await Database.connect()
     
     try:
-        pack_id = await create_pack(
+        await create_pack(
             short_name=args.pack_short_name,
             name=args.pack_name,
             pack_file=pack_file,
             number_of_themes=number_of_themes
         )
-        print(f"\n✅ Pack created successfully!")
-        print(f"   ID: {pack_id}")
-        print(f"   Name: {args.pack_name}")
-        print(f"   Short name: {args.pack_short_name}")
-        print(f"   Themes: {number_of_themes}")
-    except Exception as e:
-        print(f"\n❌ Error creating pack: {e}")
+    except Exception:
         sys.exit(1)
     finally:
         await Database.disconnect()

@@ -7,7 +7,6 @@ from database.connection import Database
 
 
 def _parse_jsonb(value) -> dict:
-    """Parse JSONB value that might be dict or string."""
     if value is None:
         return {}
     if isinstance(value, dict):
@@ -22,7 +21,6 @@ def _parse_jsonb(value) -> dict:
 
 @dataclass
 class AvailablePack:
-    """Pack with available themes info for a group of players."""
     id: UUID
     short_name: str
     name: str
@@ -33,7 +31,6 @@ class AvailablePack:
 
 
 async def create_pack(short_name: str, name: str, pack_file: dict[str, Any], number_of_themes: int) -> UUID:
-    """Create a new question pack. Returns the pack's UUID."""
     pool = Database.get_pool()
     sql = Database.load_sql("packs/create_pack.sql")
     
@@ -43,7 +40,6 @@ async def create_pack(short_name: str, name: str, pack_file: dict[str, Any], num
 
 
 async def get_pack_by_short_name(short_name: str) -> dict | None:
-    """Get pack by short name."""
     pool = Database.get_pool()
     sql = Database.load_sql("packs/get_pack_by_short_name.sql")
     
@@ -57,7 +53,6 @@ async def get_pack_by_short_name(short_name: str) -> dict | None:
 
 
 async def get_all_packs() -> list[dict]:
-    """Get all available packs."""
     pool = Database.get_pool()
     sql = Database.load_sql("packs/get_all_packs.sql")
     
@@ -72,7 +67,6 @@ async def get_all_packs() -> list[dict]:
 
 
 async def get_player_pack_histories(player_ids: list) -> list[dict]:
-    """Get pack histories for multiple players."""
     if not player_ids:
         return []
     
@@ -85,7 +79,6 @@ async def get_player_pack_histories(player_ids: list) -> list[dict]:
 
 
 def format_themes_as_ranges(themes: list[int]) -> str:
-    """Format theme indices as ranges. E.g., [0,1,2,5,6] -> '0-2,5-6'."""
     if not themes:
         return ''
     
@@ -98,7 +91,6 @@ def format_themes_as_ranges(themes: list[int]) -> str:
         if t == end + 1:
             end = t
         else:
-            # Save current range
             if start == end:
                 ranges.append(str(start))
             else:
@@ -106,7 +98,6 @@ def format_themes_as_ranges(themes: list[int]) -> str:
             start = t
             end = t
     
-    # Save last range
     if start == end:
         ranges.append(str(start))
     else:
@@ -116,11 +107,9 @@ def format_themes_as_ranges(themes: list[int]) -> str:
 
 
 async def update_player_pack_history(player_id: UUID, pack_id: UUID, themes_played: list[int]) -> None:
-    """Update player's pack history with newly played themes."""
     if not themes_played:
         return
     
-    # Convert theme indices to range string (e.g., "0-2,5-6")
     themes_str = format_themes_as_ranges(themes_played)
     
     pool = Database.get_pool()
@@ -131,7 +120,6 @@ async def update_player_pack_history(player_id: UUID, pack_id: UUID, themes_play
 
 
 def parse_themes_played(themes_str: str) -> set[int]:
-    """Parse themes_played string like '1-5, 10-11' into a set of integers."""
     if not themes_str or not themes_str.strip():
         return set()
     
@@ -147,19 +135,12 @@ def parse_themes_played(themes_str: str) -> set[int]:
 
 
 async def get_available_packs_for_players(player_ids: list, themes_needed: int = 6) -> list[AvailablePack]:
-    """
-    Find packs that have enough unplayed themes for all players.
-    Returns list of AvailablePack sorted by most available themes.
-    """
-    # Get all packs
     all_packs = await get_all_packs()
     if not all_packs:
         return []
     
-    # Get all player histories
     histories = await get_player_pack_histories(player_ids)
     
-    # Build a map: pack_id -> {player_id -> played_themes}
     pack_player_history: dict[str, dict[str, set[int]]] = {}
     for h in histories:
         pack_id = str(h['pack_id'])
@@ -177,16 +158,14 @@ async def get_available_packs_for_players(player_ids: list, themes_needed: int =
         if total_themes == 0:
             continue
         
-        all_theme_indices = set(range(0, total_themes))  # 0-indexed
+        all_theme_indices = set(range(0, total_themes))
         
-        # Find themes played by ANY player
         themes_played_by_any = set()
         for player_id in player_ids:
             player_id_str = str(player_id)
             if pack_id in pack_player_history and player_id_str in pack_player_history[pack_id]:
                 themes_played_by_any.update(pack_player_history[pack_id][player_id_str])
         
-        # Available themes = all themes - played by any player
         available_themes = all_theme_indices - themes_played_by_any
         
         if len(available_themes) >= themes_needed:
@@ -200,8 +179,6 @@ async def get_available_packs_for_players(player_ids: list, themes_needed: int =
                 available_theme_indices=sorted(available_themes)
             ))
     
-    # Sort by most available themes
     available_packs.sort(key=lambda p: p.available_themes_count, reverse=True)
     
     return available_packs
-

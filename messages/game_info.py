@@ -3,14 +3,11 @@ def build_game_info_message(
     number_of_themes: int,
     players: list[dict],
 ) -> str:
-    """Build game info message with pack, themes and players."""
-    # Pack info
     pack_display = pack_name or "Случайный"
     
-    # Build players list
     if players:
         players_list = "\n".join(
-            f"   • {p['username'] or 'Игрок'} ({p['elo_rating']} ELO)"
+            f"   • {p['username'] or 'Игрок'} ({p['elo_rating']})"
             for p in players
         )
     else:

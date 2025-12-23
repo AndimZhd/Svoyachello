@@ -2,7 +2,7 @@ from aiogram import Router, types, F
 from aiogram.filters import Command
 
 from database.game_chats import get_game_by_game_chat
-from game import pause_game_session, resume_game_session, get_session, GameState
+from game import session_manager, GameState
 
 router = Router()
 
@@ -11,13 +11,10 @@ router = Router()
 @router.message(F.text.lower() == "пауза")
 @router.message(F.text.lower() == "стоямба")
 async def pause_game(message: types.Message) -> None:
-    """Pause the current game."""
     chat_id = message.chat.id
     
-    # Check if there's a game session in this chat
-    session = get_session(chat_id)
+    session = session_manager.get(chat_id)
     if not session:
-        # Maybe check if this is a game chat
         game = await get_game_by_game_chat(chat_id)
         if not game:
             await message.answer("Нет активной игры в этом чате.")
@@ -28,7 +25,11 @@ async def pause_game(message: types.Message) -> None:
     if session.state == GameState.PAUSED:
         return
     
-    if pause_game_session(chat_id):
+    if session.state in (GameState.SHOWING_QUESTION, GameState.WAITING_ANSWER, GameState.PLAYER_ANSWERING):
+        await message.answer("Нельзя поставить на паузу во время вопроса.")
+        return
+    
+    if session_manager.pause(chat_id):
         await message.answer("⏸ Игра приостановлена. Используйте /resume для продолжения.")
     else:
         await message.answer("Не удалось приостановить игру.")
@@ -37,19 +38,16 @@ async def pause_game(message: types.Message) -> None:
 @router.message(Command("resume"))
 @router.message(F.text.lower() == "продолжить")
 async def resume_game(message: types.Message) -> None:
-    """Resume a paused game."""
     chat_id = message.chat.id
     
-    # Check if there's a game session in this chat
-    session = get_session(chat_id)
+    session = session_manager.get(chat_id)
     if not session:
         return
     
     if session.state != GameState.PAUSED:
         return
     
-    if resume_game_session(chat_id):
+    if session_manager.resume(chat_id):
         await message.answer("▶️ Игра продолжается!")
     else:
         await message.answer("Не удалось возобновить игру.")
-

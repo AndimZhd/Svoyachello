@@ -3,7 +3,6 @@ import os
 
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
 load_dotenv()
 
 from aiogram import Bot, Dispatcher
@@ -20,57 +19,51 @@ dp.include_router(commands_router)
 
 
 async def cleanup_stale_games_task(bot: Bot) -> None:
-    """Background task that cleans up stale games every 5 minutes."""
     while True:
-        await asyncio.sleep(300)  # 5 minutes
+        await asyncio.sleep(300)
         try:
             chat_ids = await cleanup_stale_games()
             for chat_id in chat_ids:
                 try:
                     await bot.send_message(chat_id, msg_game_cancelled_inactivity())
                 except Exception:
-                    pass  # Chat may be unavailable
-            if chat_ids:
-                print(f"Cleaned up {len(chat_ids)} stale game(s).")
-        except Exception as e:
-            print(f"Error cleaning up stale games: {e}")
+                    pass
+        except Exception:
+            pass
 
 
 async def main() -> None:
-    """Start the bot."""
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN environment variable is not set")
 
-    # Initialize database
     await Database.connect()
-    print("Database connected.")
 
     bot = Bot(token=token)
 
-    # Set bot commands for registration chats (groups where games are created)
     registration_commands = [
         BotCommand(command="register", description="Присоединиться к игре"),
         BotCommand(command="unregister", description="Выйти из игры"),
         BotCommand(command="themes", description="Установить количество тем"),
         BotCommand(command="pack", description="Выбрать пак вопросов"),
         BotCommand(command="pack_list", description="Список паков"),
+        BotCommand(command="make_private", description="Сделать игру приватной"),
         BotCommand(command="start", description="Начать игру"),
         BotCommand(command="player_info", description="Статистика игрока"),
+        BotCommand(command="rating", description="Рейтинг игроков"),
+        BotCommand(command="chat_rating", description="Рейтинг игроков чата"),
     ]
     
-    # Set bot commands for private chats
     private_commands = [
         BotCommand(command="player_info", description="Статистика игрока"),
+        BotCommand(command="rating", description="Рейтинг игроков"),
     ]
     
     await bot.set_my_commands(registration_commands, scope=BotCommandScopeAllGroupChats())
     await bot.set_my_commands(private_commands, scope=BotCommandScopeAllPrivateChats())
 
-    # Start background cleanup task
     cleanup_task = asyncio.create_task(cleanup_stale_games_task(bot))
 
-    print("Bot is running... Press Ctrl+C to stop.")
     try:
         await dp.start_polling(bot)
     finally:
@@ -80,4 +73,3 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-

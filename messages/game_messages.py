@@ -1,6 +1,3 @@
-"""Game-related messages for the bot."""
-
-
 def msg_pack_not_found() -> str:
     return "❌ Ошибка: пак не найден"
 

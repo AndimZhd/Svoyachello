@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS pack (
 CREATE TABLE IF NOT EXISTS game (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     chat_id BIGINT UNIQUE NOT NULL,
+    origin_chat_id BIGINT,
     pack_short_name VARCHAR(50) REFERENCES pack(short_name) ON DELETE SET NULL,
     number_of_themes INTEGER DEFAULT 6 NOT NULL,
     pack_themes INTEGER[] DEFAULT '{}',
@@ -64,6 +65,8 @@ CREATE TABLE IF NOT EXISTS game (
     scores JSONB DEFAULT '{}' NOT NULL,
     current_position JSONB DEFAULT '{"theme": 0, "question": 0}' NOT NULL,
     status VARCHAR(50) DEFAULT 'registered' NOT NULL,
+    game_mode VARCHAR(20) DEFAULT 'public' NOT NULL,
+    invite_link VARCHAR(255),
     updated_at TIMESTAMP DEFAULT NOW() NOT NULL
 );
 
@@ -81,6 +84,14 @@ CREATE TABLE IF NOT EXISTS player_pack_history (
     pack_id UUID NOT NULL REFERENCES pack(id) ON DELETE CASCADE,
     themes_played VARCHAR(255) DEFAULT '' NOT NULL,
     UNIQUE(player_id, pack_id)
+);
+
+-- Player chat tracking (tracks which players are in which chats)
+CREATE TABLE IF NOT EXISTS player_chat (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    player_id UUID NOT NULL REFERENCES player(id) ON DELETE CASCADE,
+    chat_id BIGINT NOT NULL,
+    UNIQUE(player_id, chat_id)
 );
 
 -- Function to automatically update updated_at on any row change
@@ -109,3 +120,5 @@ CREATE INDEX IF NOT EXISTS idx_game_chat_chat_id ON game_chat(chat_id);
 CREATE INDEX IF NOT EXISTS idx_game_chat_game_id ON game_chat(game_id);
 CREATE INDEX IF NOT EXISTS idx_player_pack_history_player_id ON player_pack_history(player_id);
 CREATE INDEX IF NOT EXISTS idx_player_pack_history_pack_id ON player_pack_history(pack_id);
+CREATE INDEX IF NOT EXISTS idx_player_chat_player_id ON player_chat(player_id);
+CREATE INDEX IF NOT EXISTS idx_player_chat_chat_id ON player_chat(chat_id);

@@ -1,30 +1,43 @@
-from .state_machine import (
+from .types import (
     GameState,
     AnswerState,
     GameSession,
-    start_game_session,
-    stop_game_session,
-    stop_all_sessions,
-    pause_game_session,
-    resume_game_session,
-    get_session,
+)
+
+from .sessions import (
+    SessionManager,
+    session_manager,
+)
+
+from .answers import (
     start_player_answering,
     submit_answer,
     cancel_answering,
+)
+
+from .dispute import (
+    mark_answer_correct,
+    mark_answer_incorrect,
+    mark_answer_accidental,
+    apply_dispute_result,
+)
+
+from .end_game import (
+    finalize_game,
 )
 
 __all__ = [
     'GameState',
     'AnswerState',
     'GameSession',
-    'start_game_session',
-    'stop_game_session',
-    'stop_all_sessions',
-    'pause_game_session',
-    'resume_game_session',
-    'get_session',
+    'SessionManager',
+    'session_manager',
     'start_player_answering',
     'submit_answer',
     'cancel_answering',
+    'mark_answer_correct',
+    'mark_answer_incorrect',
+    'mark_answer_accidental',
+    'apply_dispute_result',
+    'finalize_game',
 ]
-

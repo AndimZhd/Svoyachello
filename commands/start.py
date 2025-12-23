@@ -6,7 +6,6 @@ from aiogram.types import BotCommand, BotCommandScopeChat
 
 from database import games, game_chats, players, packs
 
-# Game chat specific commands
 GAME_CHAT_COMMANDS = [
     BotCommand(command="answer", description="Ответить на вопрос"),
     BotCommand(command="yes", description="Подтвердить правильный ответ"),
@@ -22,23 +21,22 @@ router = Router()
 @router.message(Command("start"))
 @router.message(F.text.lower() == "старт")
 async def start_game(message: types.Message, bot: Bot) -> None:
-    """Start the game - assign a pack and game chat, send invite link and tag players."""
     user = message.from_user
     if not user:
         return
     chat_id = message.chat.id
 
-    # Get game for this chat
     game = await games.get_game_by_chat_id(chat_id)
     if not game:
         return
+    
+    if game['status'] != 'registered':
+        return
 
-    # Check if game has players
     if not game['players']:
         await message.answer("Нет зарегистрированных игроков.")
         return
 
-    # Get available packs for all players
     themes_needed = game['number_of_themes']
     available_packs = await packs.get_available_packs_for_players(game['players'], themes_needed)
     
@@ -46,55 +44,45 @@ async def start_game(message: types.Message, bot: Bot) -> None:
         await message.answer("Нет доступных паков с достаточным количеством тем для всех игроков.")
         return
     
-    # Pick a random pack from available ones
     selected_pack = random.choice(available_packs)
     
-    # Select random themes from available ones
     selected_themes = selected_pack.available_theme_indices[:themes_needed]
-    #selected_themes.sort()
     
-    # Assign pack and themes to game
     await games.assign_pack_to_game(chat_id, selected_pack.short_name, selected_themes)
 
-    # Get an available game chat
     game_chat = await game_chats.get_available_game_chat()
     if not game_chat:
         await message.answer("Нет доступных чатов для игры. Попробуйте позже.")
         return
 
-    # Create invite link for the game chat
     try:
         invite_link = await bot.create_chat_invite_link(
             chat_id=game_chat['chat_id'],
-            member_limit=len(game['players']) * 2 + 5  # Extra buffer for retries
+            member_limit=len(game['players']) * 2 + 5
         )
     except Exception as e:
         await message.answer(f"Ошибка создания ссылки: {e}")
         return
 
-    # Assign game to the chat
     await game_chats.assign_game_to_chat(game_chat['id'], game['id'])
     
-    # Transfer game to game chat
     game_chat_id = game_chat['chat_id']
     await games.set_game_chat_id(chat_id, game_chat_id)
     
-    # Set game-specific commands for the game chat
+    await games.set_invite_link(game_chat_id, invite_link.invite_link)
+    
     try:
         await bot.set_my_commands(
             GAME_CHAT_COMMANDS,
             scope=BotCommandScopeChat(chat_id=game_chat['chat_id'])
         )
     except Exception:
-        pass  # Commands may fail if bot doesn't have permission
+        pass
     
-    # Update game status
     await games.update_game_status(game_chat_id, 'starting')
 
-    # Get player telegram_ids for tagging
     players_info = await players.get_players_telegram_ids(game['players'])
     
-    # Build player mentions
     mentions = []
     for p in players_info:
         if p['username']:
@@ -111,5 +99,3 @@ async def start_game(message: types.Message, bot: Bot) -> None:
         f"Присоединяйтесь: {invite_link.invite_link}",
         parse_mode="HTML"
     )
-
-

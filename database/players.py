@@ -4,7 +4,6 @@ from database.connection import Database
 
 
 async def upsert_player(telegram_id: int, username: str | None, first_name: str | None, last_name: str | None) -> dict:
-    """Insert or update a player. Returns the player record."""
     pool = Database.get_pool()
     sql = Database.load_sql("players/upsert_player.sql")
     
@@ -14,7 +13,6 @@ async def upsert_player(telegram_id: int, username: str | None, first_name: str 
 
 
 async def get_player_by_telegram_id(telegram_id: int) -> dict | None:
-    """Get player by Telegram ID."""
     pool = Database.get_pool()
     sql = Database.load_sql("players/get_player_by_telegram_id.sql")
     
@@ -24,7 +22,6 @@ async def get_player_by_telegram_id(telegram_id: int) -> dict | None:
 
 
 async def get_players_telegram_ids(player_ids: list[UUID]) -> list[dict]:
-    """Get telegram_ids for a list of player UUIDs."""
     if not player_ids:
         return []
     
@@ -37,7 +34,6 @@ async def get_players_telegram_ids(player_ids: list[UUID]) -> list[dict]:
 
 
 async def get_players_by_telegram_ids(telegram_ids: list[int]) -> dict[int, dict]:
-    """Get players by multiple Telegram IDs. Returns {telegram_id: player_dict}."""
     if not telegram_ids:
         return {}
     
@@ -49,3 +45,9 @@ async def get_players_by_telegram_ids(telegram_ids: list[int]) -> dict[int, dict
         return {row['telegram_id']: dict(row) for row in rows}
 
 
+async def track_player_in_chat(player_id: UUID, chat_id: int) -> None:
+    pool = Database.get_pool()
+    sql = Database.load_sql("players/upsert_player_chat.sql")
+    
+    async with pool.acquire() as conn:
+        await conn.execute(sql, player_id, chat_id)
