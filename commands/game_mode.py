@@ -2,6 +2,7 @@ from aiogram import Router, types, F
 from aiogram.filters import Command
 
 from database import games
+from game import GameStatus
 
 router = Router()
 
@@ -15,7 +16,7 @@ async def make_private(message: types.Message) -> None:
     if not game:
         return
     
-    if game['status'] != 'registered':
+    if game['status'] != GameStatus.REGISTERED.value:
         await message.answer("Нельзя изменить режим игры после её начала.")
         return
     
@@ -36,7 +37,7 @@ async def make_public(message: types.Message) -> None:
     if not game:
         return
     
-    if game['status'] != 'registered':
+    if game['status'] != GameStatus.REGISTERED.value:
         await message.answer("Нельзя изменить режим игры после её начала.")
         return
     

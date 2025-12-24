@@ -23,6 +23,13 @@ class AnswerState(Enum):
     CONFIRMED_DOESNT_COUNT = "confirmed_doesnt_count"
 
 
+class GameStatus(Enum):
+    REGISTERED = "registered"
+    STARTING = "starting"
+    RUNNING = "running"
+    FINISHED = "finished"
+
+
 @dataclass
 class GameSession:
     game_chat_id: int
@@ -53,13 +60,21 @@ class GameSession:
 
     player_correct_answers: dict[int, int] | None = None
     player_wrong_answers: dict[int, int] | None = None
-    player_abs_scores: dict[int, int] | None = None
+    player_abs_scores: dict[UUID, int] | None = None
     invite_link: str | None = None
     player_start_theme_idx: dict[UUID, int] | None = None
     timer_extension: float = 0.0
     dispute_poll_id: str | None = None
     dispute_player_id: int | None = None
     dispute_votes: dict[int, bool] | None = None
+    disputed_players: set[int] | None = None
+    
+    kick_poll_id: str | None = None
+    kick_player_id: int | None = None
+    kick_votes: dict[int, bool] | None = None
+    kicked_players: set[int] | None = None
+    
+    spectators: list[UUID] | None = None
 
     @classmethod
     def create(

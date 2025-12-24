@@ -7,13 +7,62 @@ from .sessions import session_manager
 
 def normalize_text(text: str) -> str:
     normalized = unicodedata.normalize('NFD', text)
-    return ''.join(c for c in normalized if unicodedata.category(c) != 'Mn').lower().strip()
+    # Remove diacritics
+    text = ''.join(c for c in normalized if unicodedata.category(c) != 'Mn')
+    # Keep only letters, numbers, and spaces
+    text = re.sub(r'[^\w\s]', '', text, flags=re.UNICODE)
+    # Collapse multiple spaces
+    text = re.sub(r'\s+', ' ', text)
+    return text.lower().strip()
 
 
 def remove_brackets(text: str) -> str:
     text = re.sub(r'\([^)]*\)', '', text)
     text = re.sub(r'\[[^\]]*\]', '', text)
     return text.strip()
+
+
+def levenshtein_distance(s1: str, s2: str) -> int:
+    """Calculate the Levenshtein distance between two strings."""
+    if len(s1) < len(s2):
+        s1, s2 = s2, s1
+    
+    if len(s2) == 0:
+        return len(s1)
+    
+    previous_row = range(len(s2) + 1)
+    
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1
+            deletions = current_row[j] + 1
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+    
+    return previous_row[-1]
+
+
+def get_max_allowed_distance(text_length: int) -> int:
+    """Get maximum allowed Levenshtein distance based on text length."""
+    if text_length <= 4:
+        return 0
+    if text_length <= 12:
+        return 1
+    else:
+        return 2
+
+
+def fuzzy_match(user: str, correct: str) -> bool:
+    """Check if user answer matches correct answer with allowed typos."""
+    if not user or not correct:
+        return False
+    
+    distance = levenshtein_distance(user, correct)
+    max_allowed = get_max_allowed_distance(len(correct))
+    
+    return distance <= max_allowed
 
 
 def answers_match(user: str, correct: str) -> bool:
@@ -31,8 +80,13 @@ def answers_match(user: str, correct: str) -> bool:
     ]
     
     for u, c in combinations:
-        if u and c and (u in c or c in u):
-            return True
+        if u and c:
+            # Exact containment
+            if c in u:
+                return True
+            # Fuzzy match for exact answer
+            if fuzzy_match(u, c):
+                return True
     return False
 
 
@@ -49,6 +103,7 @@ def start_player_answering(game_chat_id: int, player_telegram_id: int) -> bool:
     
     session.answering_player_id = player_telegram_id
     session.state = GameState.PLAYER_ANSWERING
+    session.timer_extension = 15.0
     return True
 
 
@@ -79,7 +134,7 @@ def submit_answer(game_chat_id: int, player_telegram_id: int, answer_text: str) 
     session.state = GameState.WAITING_ANSWER
     session.answering_player_id = None
     
-    session.timer_extension = 5.0
+    session.timer_extension = 8.0
     
     if is_correct and session.answer_event:
         session.answer_event.set()

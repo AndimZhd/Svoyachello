@@ -1,9 +1,5 @@
 def msg_pack_not_found() -> str:
-    return "❌ Ошибка: пак не найден"
-
-
-def msg_score_summary(score_messages: list[str]) -> str:
-    return f"📊 Итог: {', '.join(score_messages)}"
+    return "Пак не найден"
 
 
 def msg_current_scores(score_lines: list[str]) -> str:
@@ -27,14 +23,10 @@ def msg_question(cost: int, theme_name: str, question_text: str) -> str:
 
 
 def msg_answer(answer: str, comment: str | None = None) -> str:
-    message = f"Ответ: {answer}"
+    message = f"<b>Ответ:</b> {answer}"
     if comment:
-        message += f"\n\nКомментарий: {comment}"
+        message += f"\n\n<b>Комментарий:</b> {comment}"
     return message
-
-
-def msg_score_correction() -> str:
-    return "⚖️ Коррекция очков: /yes если правильно, /no если неправильно (5 сек)"
 
 
 def msg_game_over() -> str:
@@ -42,7 +34,7 @@ def msg_game_over() -> str:
 
 
 def msg_error(error: str) -> str:
-    return f"❌ Ошибка: {error}"
+    return f"Ошибка: {error}"
 
 
 def msg_all_players_joined() -> str:
@@ -54,53 +46,28 @@ def msg_game_cancelled_inactivity() -> str:
 
 
 def msg_time_up(player_name: str) -> str:
-    return f"⏱ Время вышло! @{player_name} не успел ответить."
+    return f"Время вышло! {player_name} не успел ответить."
 
 
 def msg_player_answering(player_name: str) -> str:
-    return f"🎯 @{player_name} отвечает! У вас 10 секунд..."
+    return f"{player_name} отвечает..."
 
 
-def msg_question_hidden(cost: int) -> str:
-    return f"❓ <b>{cost}</b>\n\n<i>Вопрос скрыт - игрок отвечает...</i>"
-
-
-def msg_someone_answering() -> str:
-    return "Кто-то уже отвечает!"
+def msg_question_hidden(cost: int, form: str) -> str:
+    if form == '':
+        form = 'Вопрос скрыт - игрок отвечает...'
+    else:
+        form = '<b>Форма: </b>' + form.upper()
+    return f"❓ <b>{cost}</b>\n\n<i>{form.upper()}</i>"
 
 
 def msg_correct_answer(player_name: str) -> str:
-    return f"✅ @{player_name} ответил правильно!"
+    return f"{player_name} ответил правильно"
 
 
 def msg_incorrect_answer(player_name: str) -> str:
-    return f"❌ @{player_name} ответил неправильно!"
-
-
-def msg_question_claimed() -> str:
-    return "Вопрос уже засчитан другому игроку!"
-
-
-def msg_answer_already_correct() -> str:
-    return "Ваш ответ уже засчитан как правильный!"
+    return f"{player_name} ответил неправильно"
 
 
 def msg_answer_confirmed(player_name: str) -> str:
-    return f"✅ @{player_name}: ответ засчитан!"
-
-
-def msg_answer_already_incorrect() -> str:
-    return "Ваш ответ уже засчитан как неправильный!"
-
-
-def msg_answer_rejected(player_name: str) -> str:
-    return f"❌ @{player_name}: ответ не засчитан!"
-
-
-def msg_answer_already_accidental() -> str:
-    return "Ваш ответ уже помечен как случайный!"
-
-
-def msg_answer_marked_accidental(player_name: str) -> str:
-    return f"🙈 @{player_name}: ответ помечен как случайный!"
-
+    return f"Принято, {player_name}"

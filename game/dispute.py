@@ -7,7 +7,7 @@ from aiogram import Bot
 if TYPE_CHECKING:
     from .types import GameSession
 
-from .types import AnswerState
+from .types import AnswerState, GameState
 
 
 def mark_answer_correct(session: GameSession, player_telegram_id: int) -> bool:
@@ -58,11 +58,29 @@ def mark_answer_accidental(session: GameSession, player_telegram_id: int) -> boo
 
 
 async def apply_dispute_result(session: GameSession, bot: Bot) -> None:
+    from .sessions import session_manager
+    
     if not session.dispute_votes or session.dispute_player_id is None:
+        if session.dispute_poll_id:
+            session_manager.unregister_poll(session.dispute_poll_id)
         session.dispute_poll_id = None
         session.dispute_player_id = None
         session.dispute_votes = None
         return
+    
+    in_score_correction = (
+        session.state == GameState.SCORE_CORRECTION or
+        (session.state == GameState.PAUSED and session.state_before_pause == GameState.SCORE_CORRECTION)
+    )
+    if not in_score_correction:
+        if session.dispute_poll_id:
+            session_manager.unregister_poll(session.dispute_poll_id)
+        session.dispute_poll_id = None
+        session.dispute_player_id = None
+        session.dispute_votes = None
+        return
+    
+    session.timer_extension = 5.0
     
     yes_votes = sum(1 for v in session.dispute_votes.values() if v)
     no_votes = sum(1 for v in session.dispute_votes.values() if not v)
@@ -88,6 +106,8 @@ async def apply_dispute_result(session: GameSession, bot: Bot) -> None:
             f"🗳 Голоса разделились поровну ({yes_votes}:{no_votes}). Ответ не засчитывается."
         )
     
+    if session.dispute_poll_id:
+        session_manager.unregister_poll(session.dispute_poll_id)
     session.dispute_poll_id = None
     session.dispute_player_id = None
     session.dispute_votes = None

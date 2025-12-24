@@ -1,6 +1,7 @@
 from .types import (
     GameState,
     AnswerState,
+    GameStatus,
     GameSession,
 )
 
@@ -29,6 +30,7 @@ from .end_game import (
 __all__ = [
     'GameState',
     'AnswerState',
+    'GameStatus',
     'GameSession',
     'SessionManager',
     'session_manager',

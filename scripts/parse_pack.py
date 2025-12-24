@@ -91,7 +91,6 @@ def parse_pack_from_segments(segments: list[dict]) -> dict:
     """
     result = {
         'info': '',
-        'theme_names': [],
         'themes': []
     }
     
@@ -178,7 +177,6 @@ def parse_pack_from_segments(segments: list[dict]) -> dict:
                 theme_counter += 1  # Increment counter only when theme is confirmed
                 author = author_match.group(1).strip()
                 theme_name = f"{theme_counter}. {confirmed_theme_name} Автор: {author}" if author else f"{theme_counter}. {confirmed_theme_name}"
-                result['theme_names'].append(theme_name)
                 current_theme = {
                     'name': theme_name,
                     'questions': []

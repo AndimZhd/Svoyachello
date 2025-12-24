@@ -3,9 +3,18 @@ from aiogram.filters import Command
 
 from commands.common import send_game_info
 from database import games, game_chats, packs
-from game import session_manager
+from database.players import get_player_by_telegram_id
+from database.player_rights import ensure_player_rights
+from game import session_manager, GameStatus, finalize_game
 
 router = Router()
+
+
+async def is_spectator(chat_id: int, telegram_id: int) -> bool:
+    player = await get_player_by_telegram_id(telegram_id)
+    if not player:
+        return False
+    return session_manager.is_spectator(chat_id, player['id'])
 
 
 @router.message(Command("themes"))
@@ -22,7 +31,7 @@ async def themes_command(message: types.Message) -> None:
         await message.answer("В этом чате нет активной игры.")
         return
     
-    if game['status'] != 'registered':
+    if game['status'] != GameStatus.REGISTERED.value:
         await message.answer("Нельзя изменить настройки после начала игры.")
         return
     
@@ -61,7 +70,7 @@ async def pack_command(message: types.Message) -> None:
         await message.answer("В этом чате нет активной игры.")
         return
     
-    if game['status'] != 'registered':
+    if game['status'] != GameStatus.REGISTERED.value:
         await message.answer("Нельзя изменить настройки после начала игры.")
         return
     
@@ -99,7 +108,7 @@ async def pack_command(message: types.Message) -> None:
 
 
 @router.message(Command("pack_list"))
-@router.message(F.text.lower() == "паки ")
+@router.message(F.text.lower() == "паки")
 async def pack_list_command(message: types.Message) -> None:
     all_packs = await packs.get_all_packs()
     
@@ -118,29 +127,96 @@ async def pack_list_command(message: types.Message) -> None:
 
 
 @router.message(Command("abort"))
-async def abort_command(message: types.Message) -> None:
-    chat_id = message.chat.id
-    
-    game = await game_chats.get_game_by_game_chat(chat_id)
-    
-    if not game:
-        game = await games.get_game_by_chat_id(chat_id)
-    
-    if not game:
-        await message.answer("В этом чате нет активной игры.")
+async def abort_command(message: types.Message, bot: Bot) -> None:
+    user = message.from_user
+    if not user:
         return
     
-    await session_manager.stop(chat_id)
+    rights = await ensure_player_rights(user.id)
+    if rights and not rights['can_abort']:
+        return
     
-    await game_chats.release_game_chat(game['id'])
+    chat_id = message.chat.id
     
-    await games.delete_game(game['chat_id'])
+    await finalize_game(chat_id, bot, is_aborted=True)
     
     await message.answer("🛑 Игра отменена.")
 
 
 @router.message(Command("abort_all"))
 async def abort_all_command(message: types.Message, bot: Bot) -> None:
-    await session_manager.finalize_all(bot)
+    user = message.from_user
+    if not user:
+        return
     
-    await message.answer("🗑 Все игры завершены, результаты сохранены.")
+    rights = await ensure_player_rights(user.id)
+    if not rights or not rights['can_abort_all']:
+        return
+    
+    await session_manager.finalize_all(bot, is_aborted=True)
+    
+    await message.answer("🗑 Все игры отменены.")
+
+
+@router.message(Command("kick_player"))
+async def kick_player_command(message: types.Message, bot: Bot) -> None:
+    import asyncio
+    from commands.answer import apply_kick_result
+    
+    user = message.from_user
+    if not user:
+        return
+    
+    chat_id = message.chat.id
+    session = session_manager.get(chat_id)
+    
+    if not session:
+        return
+    
+    if await is_spectator(chat_id, user.id):
+        return
+    
+    if session.kick_poll_id is not None:
+        await message.answer("Уже идёт голосование по исключению игрока.")
+        return
+    
+    if not message.reply_to_message or not message.reply_to_message.from_user:
+        await message.answer("Ответьте на сообщение игрока, которого хотите исключить.")
+        return
+    
+    target = message.reply_to_message.from_user
+    
+    if target.is_bot:
+        return
+    
+    if session.kicked_players and target.id in session.kicked_players:
+        await message.answer("Этот игрок уже исключён.")
+        return
+    
+    target_name = f"{target.first_name or ''} {target.last_name or ''}".strip() or target.username or "Игрок"
+    
+    poll_msg = await bot.send_poll(
+        chat_id=chat_id,
+        question=f"Исключить игрока {target_name}?",
+        options=["✅ Да, исключить", "❌ Нет, оставить"],
+        is_anonymous=False,
+        allows_multiple_answers=False
+    )
+    
+    if not poll_msg.poll:
+        await message.answer("Ошибка создания голосования.")
+        return
+    
+    poll_id = poll_msg.poll.id
+    session.kick_poll_id = poll_id
+    session.kick_player_id = target.id
+    session.kick_votes = {}
+    session_manager.register_poll(poll_id, chat_id)
+    
+    async def auto_apply_kick():
+        await asyncio.sleep(10)
+        current_session = session_manager.get(chat_id)
+        if current_session and current_session.kick_poll_id == poll_id:
+            await apply_kick_result(current_session, bot)
+    
+    asyncio.create_task(auto_apply_kick())

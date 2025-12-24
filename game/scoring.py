@@ -26,27 +26,23 @@ async def finalize_question_scores(session: GameSession, cost: int, bot: Bot) ->
         if not player:
             continue
         
+        player_uuid = player['id']
+        
         if answer_state == AnswerState.CORRECT:
-            score_changes[player['id']] = cost
+            score_changes[player_uuid] = cost
             score_messages.append(f"✅ +{cost}")
             if session.player_correct_answers is not None:
                 session.player_correct_answers[telegram_id] = session.player_correct_answers.get(telegram_id, 0) + 1
             if session.player_abs_scores is not None:
-                session.player_abs_scores[telegram_id] = session.player_abs_scores.get(telegram_id, 0) + cost
+                session.player_abs_scores[player_uuid] = session.player_abs_scores.get(player_uuid, 0) + cost
         elif answer_state == AnswerState.INCORRECT:
-            score_changes[player['id']] = -cost
+            score_changes[player_uuid] = -cost
             score_messages.append(f"❌ -{cost}")
             if session.player_wrong_answers is not None:
                 session.player_wrong_answers[telegram_id] = session.player_wrong_answers.get(telegram_id, 0) + 1
     
     if score_changes:
         await games.bulk_update_player_scores(session.game_chat_id, score_changes)
-    
-    if score_messages:
-        await bot.send_message(
-            session.game_chat_id,
-            messages.msg_score_summary(score_messages)
-        )
 
 
 async def show_current_scores(session: GameSession, bot: Bot) -> None:

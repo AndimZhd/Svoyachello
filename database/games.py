@@ -2,6 +2,7 @@ import json
 from uuid import UUID
 
 from database.connection import Database
+from game.types import GameStatus
 
 
 def _parse_jsonb(value) -> dict:
@@ -35,12 +36,12 @@ async def get_game_by_chat_id(chat_id: int) -> dict | None:
         return dict(row) if row else None
 
 
-async def update_game_status(chat_id: int, status: str) -> None:
+async def update_game_status(chat_id: int, status: GameStatus) -> None:
     pool = Database.get_pool()
     sql = Database.load_sql("games/update_game_status.sql")
     
     async with pool.acquire() as conn:
-        await conn.execute(sql, chat_id, status)
+        await conn.execute(sql, chat_id, status.value)
 
 
 async def add_player_to_game(chat_id: int, player_id: UUID) -> None:
@@ -50,6 +51,14 @@ async def add_player_to_game(chat_id: int, player_id: UUID) -> None:
     async with pool.acquire() as conn:
         async with conn.transaction():
             await conn.execute(sql, chat_id, player_id)
+
+
+async def add_spectator_to_game(chat_id: int, player_id: UUID) -> None:
+    pool = Database.get_pool()
+    sql = Database.load_sql("games/add_spectator_to_game.sql")
+    
+    async with pool.acquire() as conn:
+        await conn.execute(sql, chat_id, player_id)
 
 
 async def remove_player_from_game(chat_id: int, player_id: UUID) -> None:

@@ -94,6 +94,17 @@ CREATE TABLE IF NOT EXISTS player_chat (
     UNIQUE(player_id, chat_id)
 );
 
+
+-- Player rights table (controls permissions for game commands)
+CREATE TABLE IF NOT EXISTS player_rights (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    player_id UUID UNIQUE NOT NULL REFERENCES player(id) ON DELETE CASCADE,
+    can_abort BOOLEAN DEFAULT TRUE NOT NULL,
+    number_of_pauses INTEGER DEFAULT 5 NOT NULL,
+    can_abort_all BOOLEAN DEFAULT FALSE NOT NULL,
+    can_correct BOOLEAN DEFAULT TRUE NOT NULL
+);
+
 -- Function to automatically update updated_at on any row change
 CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS TRIGGER AS $$
@@ -122,3 +133,4 @@ CREATE INDEX IF NOT EXISTS idx_player_pack_history_player_id ON player_pack_hist
 CREATE INDEX IF NOT EXISTS idx_player_pack_history_pack_id ON player_pack_history(pack_id);
 CREATE INDEX IF NOT EXISTS idx_player_chat_player_id ON player_chat(player_id);
 CREATE INDEX IF NOT EXISTS idx_player_chat_chat_id ON player_chat(chat_id);
+CREATE INDEX IF NOT EXISTS idx_player_rights_player_id ON player_rights(player_id);

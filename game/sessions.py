@@ -3,7 +3,7 @@ from uuid import UUID
 
 from aiogram import Bot
 
-from database import games, packs
+from database import games, packs, game_chats
 import messages
 from .types import GameState, GameSession
 
@@ -11,6 +11,16 @@ from .types import GameState, GameSession
 class SessionManager:
     def __init__(self) -> None:
         self._sessions: dict[int, GameSession] = {}
+        self._poll_to_chat: dict[str, int] = {}
+    
+    def register_poll(self, poll_id: str, chat_id: int) -> None:
+        self._poll_to_chat[poll_id] = chat_id
+    
+    def unregister_poll(self, poll_id: str) -> None:
+        self._poll_to_chat.pop(poll_id, None)
+    
+    def get_chat_by_poll(self, poll_id: str) -> int | None:
+        return self._poll_to_chat.get(poll_id)
     
     async def start(self, game_chat_id: int, origin_chat_id: int, bot: Bot) -> None:
         if game_chat_id in self._sessions:
@@ -54,8 +64,7 @@ class SessionManager:
             except asyncio.CancelledError:
                 pass
         
-        if game_chat_id in self._sessions:
-            del self._sessions[game_chat_id]
+        self.remove(game_chat_id)
     
     def stop_all(self) -> None:
         for session in self._sessions.values():
@@ -63,18 +72,19 @@ class SessionManager:
                 session.task.cancel()
         self._sessions.clear()
     
-    async def finalize_all(self, bot: Bot) -> None:
+    async def finalize_all(self, bot: Bot, is_aborted: bool = False) -> None:
         from .end_game import finalize_game
         
-        sessions = list(self._sessions.values())
+        chat_ids = list(self._sessions.keys())
         
-        for session in sessions:
+        for chat_id in chat_ids:
             try:
-                await finalize_game(session, bot)
+                await finalize_game(chat_id, bot, is_aborted=is_aborted)
             except Exception:
                 pass
         
-        self.stop_all()
+        await game_chats.release_all_game_chats()
+        await games.delete_all_games()
     
     def get(self, game_chat_id: int) -> GameSession | None:
         return self._sessions.get(game_chat_id)
@@ -96,6 +106,30 @@ class SessionManager:
             session.player_start_theme_idx[player_id] = session.current_theme_idx
         
         return True
+    
+    def add_spectator(self, game_chat_id: int, player_id: UUID) -> bool:
+        session = self._sessions.get(game_chat_id)
+        if not session:
+            return False
+        
+        if session.spectators is None:
+            session.spectators = []
+        
+        if player_id in session.spectators:
+            return False
+        
+        session.spectators.append(player_id)
+        
+        if session.player_start_theme_idx is not None:
+            session.player_start_theme_idx[player_id] = session.current_theme_idx
+        
+        return True
+    
+    def is_spectator(self, game_chat_id: int, player_id: UUID) -> bool:
+        session = self._sessions.get(game_chat_id)
+        if not session or not session.spectators:
+            return False
+        return player_id in session.spectators
     
     def pause(self, game_chat_id: int) -> bool:
         session = self._sessions.get(game_chat_id)

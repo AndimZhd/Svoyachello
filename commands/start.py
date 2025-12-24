@@ -5,6 +5,7 @@ from aiogram.filters import Command
 from aiogram.types import BotCommand, BotCommandScopeChat
 
 from database import games, game_chats, players, packs
+from game import GameStatus
 
 GAME_CHAT_COMMANDS = [
     BotCommand(command="answer", description="Ответить на вопрос"),
@@ -30,7 +31,7 @@ async def start_game(message: types.Message, bot: Bot) -> None:
     if not game:
         return
     
-    if game['status'] != 'registered':
+    if game['status'] != GameStatus.REGISTERED.value:
         return
 
     if not game['players']:
@@ -79,7 +80,7 @@ async def start_game(message: types.Message, bot: Bot) -> None:
     except Exception:
         pass
     
-    await games.update_game_status(game_chat_id, 'starting')
+    await games.update_game_status(game_chat_id, GameStatus.STARTING)
 
     players_info = await players.get_players_telegram_ids(game['players'])
     

@@ -4,7 +4,8 @@ from aiogram import Bot, Router, types, F
 from aiogram.filters import Command
 
 from database.players import get_player_by_telegram_id
-from database.games import bulk_update_player_scores
+from database.games import bulk_update_player_scores, get_game_scores
+from database.player_rights import ensure_player_rights
 from game import session_manager, GameState, AnswerState
 from game import answers as game_answers
 from game import dispute
@@ -14,6 +15,13 @@ import messages.game_messages as gm
 router = Router()
 
 _waiting_for_answer: dict[tuple[int, int], asyncio.Task] = {}
+
+
+async def is_spectator(chat_id: int, telegram_id: int) -> bool:
+    player = await get_player_by_telegram_id(telegram_id)
+    if not player:
+        return False
+    return session_manager.is_spectator(chat_id, player['id'])
 
 
 async def restore_question_message(bot: Bot, chat_id: int, session) -> None:
@@ -49,12 +57,13 @@ async def answer_command(message: types.Message, bot: Bot) -> None:
         return
     
     if session.state != GameState.WAITING_ANSWER:
-        if session.state == GameState.PLAYER_ANSWERING:
-            await message.answer(gm.msg_someone_answering())
         return
     
     player = await get_player_by_telegram_id(user.id)
     if not player or player['id'] not in session.players:
+        return
+    
+    if await is_spectator(chat_id, user.id):
         return
     
     if session.answered_players is not None and user.id in session.answered_players:
@@ -66,10 +75,11 @@ async def answer_command(message: types.Message, bot: Bot) -> None:
     if session.current_question_message_id:
         try:
             cost = session.current_question_data.get('cost', 0) if session.current_question_data else 0
+            form = session.current_question_data.get('form', '') if session.current_question_data else ''
             await bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=session.current_question_message_id,
-                text=gm.msg_question_hidden(cost),
+                text=gm.msg_question_hidden(cost, form),
                 parse_mode="HTML"
             )
         except Exception:
@@ -116,6 +126,12 @@ async def yes_command(message: types.Message) -> None:
     if not in_score_correction:
         return
     
+    if session.dispute_player_id == user.id:
+        return
+    
+    if session.disputed_players and user.id in session.disputed_players:
+        return
+    
     if not dispute.mark_answer_correct(session, user.id):
         return
     
@@ -145,11 +161,17 @@ async def no_command(message: types.Message) -> None:
     if not in_score_correction:
         return
     
+    if session.dispute_player_id == user.id:
+        return
+    
+    if session.disputed_players and user.id in session.disputed_players:
+        return
+    
     if not dispute.mark_answer_incorrect(session, user.id):
         return
     
     player_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username or "Игрок"
-    await message.answer(gm.msg_answer_rejected(player_name))
+    await message.answer(gm.msg_answer_confirmed(player_name))
     
     session.timer_extension = 5.0
 
@@ -175,11 +197,17 @@ async def accidentally_command(message: types.Message) -> None:
     if not in_score_correction:
         return
     
+    if session.dispute_player_id == user.id:
+        return
+    
+    if session.disputed_players and user.id in session.disputed_players:
+        return
+    
     if not dispute.mark_answer_accidental(session, user.id):
         return
     
     player_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username or "Игрок"
-    await message.answer(gm.msg_answer_marked_accidental(player_name))
+    await message.answer(gm.msg_answer_confirmed(player_name))
     
     session.timer_extension = 5.0
 
@@ -197,6 +225,9 @@ async def dispute_command(message: types.Message, bot: Bot) -> None:
     if not session:
         return
     
+    if await is_spectator(chat_id, user.id):
+        return
+    
     in_score_correction = (
         session.state == GameState.SCORE_CORRECTION or
         (session.state == GameState.PAUSED and session.state_before_pause == GameState.SCORE_CORRECTION)
@@ -207,34 +238,26 @@ async def dispute_command(message: types.Message, bot: Bot) -> None:
     if session.dispute_poll_id is not None:
         await message.answer("Уже идёт голосование по другому спору.")
         return
-    
-    target_user_id = None
-    target_name = None
-    
-    if message.reply_to_message and message.reply_to_message.from_user:
-        target = message.reply_to_message.from_user
-    else:
-        target = user
-    
-    if not target.is_bot and session.answered_players and target.id in session.answered_players:
-        target_user_id = target.id
-        target_name = f"{target.first_name or ''} {target.last_name or ''}".strip() or target.username or "Игрок"
-    
-    if target_user_id is None and session.answered_players:
-        answered_list = list(session.answered_players.keys())
-        if answered_list:
-            target_user_id = answered_list[-1]
-            target_name = "последнего ответившего"
-    
-    if target_user_id is None:
-        await message.answer("Не удалось определить игрока для спора.")
+
+    if not message.reply_to_message or not message.reply_to_message.from_user:
+        await message.answer("Ответьте на сообщение с ответом игрока, чтобы оспорить его.")
         return
+    
+    target = message.reply_to_message.from_user
+    player_answer = message.reply_to_message.text or "???"
+    
+    if target.is_bot or not session.answered_players or target.id not in session.answered_players:
+        await message.answer("Этот игрок не отвечал на текущий вопрос.")
+        return
+    
+    target_user_id = target.id
+    target_name = f"{target.first_name or ''} {target.last_name or ''}".strip() or target.username or "Игрок"
     
     correct_answer = session.current_question_data.get('answer', '???') if session.current_question_data else '???'
     
     poll_msg = await bot.send_poll(
         chat_id=chat_id,
-        question=f"Считать ответ {target_name} правильным?\n(Правильный ответ: {correct_answer})",
+        question=f"Засчитать ответ «{player_answer}»?\n(Правильный ответ: {correct_answer})",
         options=["✅ Да, засчитать", "❌ Нет, не засчитывать"],
         is_anonymous=False,
         allows_multiple_answers=False
@@ -244,25 +267,87 @@ async def dispute_command(message: types.Message, bot: Bot) -> None:
         await message.answer("Ошибка создания голосования.")
         return
     
-    session.dispute_poll_id = poll_msg.poll.id
+    poll_id = poll_msg.poll.id
+    session.dispute_poll_id = poll_id
     session.dispute_player_id = target_user_id
     session.dispute_votes = {}
+    session_manager.register_poll(poll_id, chat_id)
     
-    session.timer_extension = 15.0
+    if session.disputed_players is None:
+        session.disputed_players = set()
+    session.disputed_players.add(target_user_id)
     
-    await message.answer("🗳 Голосование начато! У вас есть 15 секунд.")
+    session.timer_extension = 10.0
+    
+    async def auto_apply_dispute():
+        await asyncio.sleep(10)
+        current_session = session_manager.get(chat_id)
+        if current_session and current_session.dispute_poll_id == poll_id:
+            await dispute.apply_dispute_result(current_session, bot)
+    
+    asyncio.create_task(auto_apply_dispute())
 
 
 @router.poll_answer()
-async def handle_poll_answer(poll_answer) -> None:
-    for chat_id, session in session_manager.get_all().items():
-        if session.dispute_poll_id == poll_answer.poll_id:
-            user_id = poll_answer.user.id
-            if poll_answer.option_ids:
-                vote = poll_answer.option_ids[0] == 0
-                if session.dispute_votes is not None:
-                    session.dispute_votes[user_id] = vote
-            break
+async def handle_poll_answer(poll_answer, bot: Bot) -> None:
+    chat_id = session_manager.get_chat_by_poll(poll_answer.poll_id)
+    if not chat_id:
+        return
+    
+    session = session_manager.get(chat_id)
+    if not session:
+        return
+    
+    user_id = poll_answer.user.id
+    if not poll_answer.option_ids:
+        return
+    
+    vote = poll_answer.option_ids[0] == 0
+    
+    if session.dispute_poll_id == poll_answer.poll_id:
+        if session.dispute_votes is not None:
+            session.dispute_votes[user_id] = vote
+            if len(session.dispute_votes) >= len(session.players):
+                await dispute.apply_dispute_result(session, bot)
+    
+    elif session.kick_poll_id == poll_answer.poll_id:
+        if session.kick_votes is not None:
+            session.kick_votes[user_id] = vote
+            if len(session.kick_votes) >= len(session.players):
+                await apply_kick_result(session, bot)
+
+
+async def apply_kick_result(session, bot: Bot) -> None:
+    if session.kick_votes is None or session.kick_player_id is None:
+        if session.kick_poll_id:
+            session_manager.unregister_poll(session.kick_poll_id)
+        session.kick_poll_id = None
+        session.kick_player_id = None
+        session.kick_votes = None
+        return
+    
+    yes_votes = sum(1 for v in session.kick_votes.values() if v)
+    total_votes = len(session.kick_votes)
+    
+    if yes_votes > total_votes / 2:
+        try:
+            await bot.ban_chat_member(session.game_chat_id, session.kick_player_id)
+        except Exception:
+            pass
+        
+        if session.kicked_players is None:
+            session.kicked_players = set()
+        session.kicked_players.add(session.kick_player_id)
+        
+        await bot.send_message(session.game_chat_id, "🚪 Игрок исключён из игры.")
+    else:
+        await bot.send_message(session.game_chat_id, "Голосование не прошло. Игрок остаётся в игре.")
+    
+    if session.kick_poll_id:
+        session_manager.unregister_poll(session.kick_poll_id)
+    session.kick_poll_id = None
+    session.kick_player_id = None
+    session.kick_votes = None
 
 
 @router.message(Command("correct"))
@@ -281,6 +366,10 @@ async def correct_command(message: types.Message) -> None:
     if session.state != GameState.PAUSED:
         return
     
+    rights = await ensure_player_rights(user.id)
+    if rights and not rights['can_correct']:
+        return
+    
     text = message.text or ""
     parts = text.split(maxsplit=1)
     if len(parts) < 2:
@@ -292,12 +381,38 @@ async def correct_command(message: types.Message) -> None:
         await message.answer("Укажите число. Например: /correct 10 или /correct -20")
         return
     
+    if amount < -100 or amount > 100:
+        await message.answer("Значение должно быть от -100 до 100.")
+        return
+    
+    if amount % 10 != 0:
+        await message.answer("Значение должно быть кратно 10.")
+        return
+    
     player = await get_player_by_telegram_id(user.id)
     if not player or player['id'] not in session.players:
         await message.answer("Вы не являетесь игроком этой игры.")
         return
     
+    scores = await get_game_scores(chat_id)
+    current_score = int(scores.get(str(player['id']), 0))
+    new_score = current_score + amount
+    
+    if new_score > 10000:
+        new_score = 10000
+        amount = new_score - current_score
+    
+    if new_score < -10000:
+        new_score = -10000
+        amount = new_score - current_score
+    
+    if amount == 0:
+        return
+    
     await bulk_update_player_scores(chat_id, {player['id']: amount})
+    
+    if session.player_abs_scores is not None:
+        session.player_abs_scores[player['id']] = session.player_abs_scores.get(player['id'], 0) + amount
     
     player_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username or "Игрок"
     sign = "+" if amount >= 0 else ""
@@ -325,7 +440,6 @@ async def handle_answer_text(message: types.Message, bot: Bot) -> None:
         del _waiting_for_answer[key]
     
     if session.question_claimed:
-        await message.answer(gm.msg_question_claimed())
         game_answers.cancel_answering(chat_id)
         return
     

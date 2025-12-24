@@ -3,8 +3,8 @@ from aiogram.filters import ChatMemberUpdatedFilter, IS_NOT_MEMBER, IS_MEMBER
 from aiogram.types import ChatMemberUpdated
 
 from commands import common
-from database import players, games, game_chats
-from game import session_manager
+from database import players, games, game_chats, packs
+from game import session_manager, GameStatus
 from messages import msg_all_players_joined
 
 router = Router()
@@ -43,14 +43,41 @@ async def on_player_joined(event: ChatMemberUpdated, bot: Bot) -> None:
             await kick_player(bot, chat_id, user.id)
             return
     
-    if status == 'running':
+    if status == GameStatus.RUNNING.value:
         db_player = await common.ensure_player_exists(user)
-        if db_player['id'] not in game['players']:
-            await games.add_player_to_game(game['chat_id'], db_player['id'])
-            session_manager.add_player(chat_id, db_player['id'])
+        if db_player['id'] in game['players']:
+            return
+        
+        spectators = game.get('spectators') or []
+        if db_player['id'] in spectators:
+            return
+        
+        session = session_manager.get(chat_id)
+        if session:
+            remaining_themes = session.pack_themes[session.current_theme_idx:]
+            
+            pack = await packs.get_pack_by_short_name(game['pack_short_name'])
+            if pack:
+                histories = await packs.get_player_pack_histories([db_player['id']])
+                player_played_themes: set[int] = set()
+                
+                for h in histories:
+                    if str(h['pack_id']) == str(pack['id']):
+                        player_played_themes = packs.parse_themes_played(h['themes_played'])
+                        break
+                
+                has_played_remaining = any(t in player_played_themes for t in remaining_themes)
+                
+                if has_played_remaining:
+                    await games.add_spectator_to_game(game['chat_id'], db_player['id'])
+                    session_manager.add_spectator(chat_id, db_player['id'])
+                    return
+        
+        await games.add_player_to_game(game['chat_id'], db_player['id'])
+        session_manager.add_player(chat_id, db_player['id'])
         return
     
-    if status != 'starting':
+    if status != GameStatus.STARTING.value:
         return
     
     db_player = await common.ensure_player_exists(user)
@@ -73,7 +100,7 @@ async def on_player_joined(event: ChatMemberUpdated, bot: Bot) -> None:
             pass
     
     if joined_count == len(game['players']):
-        await games.update_game_status(game['chat_id'], 'running')
+        await games.update_game_status(game['chat_id'], GameStatus.RUNNING)
         await bot.send_message(chat_id, msg_all_players_joined())
         
         origin_chat_id = game.get('origin_chat_id') or game['chat_id']
