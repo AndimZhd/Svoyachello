@@ -1,3 +1,4 @@
+import asyncio
 from uuid import UUID
 
 from aiogram import Bot
@@ -107,9 +108,11 @@ async def update_player_statistics(session, player_scores: dict[UUID, int], winn
 
 
 async def send_game_results(bot: Bot, session, sorted_players: list[UUID], 
-                           player_scores: dict[UUID, int], player_ratings: dict[UUID, int],
-                           elo_changes: dict[UUID, int], uuid_to_info: dict[str, dict]) -> None:
+                          player_scores: dict[UUID, int], player_ratings: dict[UUID, int],
+                          elo_changes: dict[UUID, int], uuid_to_info: dict[str, dict]) -> None:
     """Send game results to game chat and origin chat."""
+    import messages
+    
     result_lines = []
     
     for player_uuid in sorted_players:
@@ -127,6 +130,8 @@ async def send_game_results(bot: Bot, session, sorted_players: list[UUID],
     results_message = "📊 <b>Итоги игры:</b>\n\n" + "\n".join(result_lines)
     
     await bot.send_message(session.game_chat_id, results_message, parse_mode="HTML")
+
+    await bot.send_message(session.game_chat_id, messages.msg_players_kick_warning())
     
     if session.origin_chat_id != session.game_chat_id:
         try:
@@ -198,18 +203,20 @@ async def finalize_game(chat_id: int, bot: Bot, is_aborted: bool = False) -> Non
         spectator_telegram_ids = [info['telegram_id'] for info in spectators_info if info.get('telegram_id')]
     
     if is_aborted:
-        await kick_users_from_game_chat(bot, game_chat_id, player_telegram_ids)
-        await kick_users_from_game_chat(bot, game_chat_id, spectator_telegram_ids)
-        
-        if session.kicked_players:
-            await unban_kicked_players(bot, game_chat_id, session.kicked_players)
-        
         pack = await packs.get_pack_by_short_name(game['pack_short_name'])
         if pack:
             await update_pack_history(session, pack['id'], session.players, up_to_current=True)
             
             if session.spectators:
                 await update_pack_history(session, pack['id'], session.spectators, up_to_current=True)
+
+        await asyncio.sleep(60)
+
+        await kick_users_from_game_chat(bot, game_chat_id, player_telegram_ids)
+        await kick_users_from_game_chat(bot, game_chat_id, spectator_telegram_ids)
+        
+        if session.kicked_players:
+            await unban_kicked_players(bot, game_chat_id, session.kicked_players)
         
         await cleanup_game(game['id'], game_chat_id)
         await session_manager.stop(chat_id)
@@ -232,18 +239,20 @@ async def finalize_game(chat_id: int, bot: Bot, is_aborted: bool = False) -> Non
     
     await send_game_results(bot, session, sorted_players, player_scores, player_ratings, elo_changes, uuid_to_info)
     
-    await kick_users_from_game_chat(bot, game_chat_id, player_telegram_ids)
-    await kick_users_from_game_chat(bot, game_chat_id, spectator_telegram_ids)
-    
-    if session.kicked_players:
-        await unban_kicked_players(bot, game_chat_id, session.kicked_players)
-    
     pack = await packs.get_pack_by_short_name(game['pack_short_name'])
     if pack:
         await update_pack_history(session, pack['id'], session.players)
         
         if session.spectators:
             await update_pack_history(session, pack['id'], session.spectators)
+
+    await asyncio.sleep(60)
+    
+    await kick_users_from_game_chat(bot, game_chat_id, player_telegram_ids)
+    await kick_users_from_game_chat(bot, game_chat_id, spectator_telegram_ids)
+    
+    if session.kicked_players:
+        await unban_kicked_players(bot, game_chat_id, session.kicked_players)
     
     await cleanup_game(game['id'], game_chat_id)
     

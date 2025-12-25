@@ -10,6 +10,11 @@ def msg_pack_info(pack_info: str) -> str:
     return f"📦 <b>Информация о паке:</b>\n\n{pack_info}"
 
 
+def msg_themes_list(theme_names: list[str]) -> str:
+    """Format a list of themes that will be played in the game."""
+    return f"📋 <b>Темы игры:</b>\n\n" + "\n".join(theme_names)
+
+
 def msg_theme_name(theme_name: str) -> str:
     return f"📚 <b>{theme_name}</b>"
 
@@ -36,6 +41,10 @@ def msg_answer(answer: str, comment: str | None = None) -> str:
 
 def msg_game_over() -> str:
     return "🏆 Игра окончена!"
+
+
+def msg_players_kick_warning() -> str:
+    return "⏱️ Через 1 минуту все игроки будут удалены из игрового чата."
 
 
 def msg_error(error: str) -> str:

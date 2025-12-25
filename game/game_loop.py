@@ -69,6 +69,21 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
                 parse_mode="HTML"
             )
             await wait_with_pause(session, 5)
+            
+            # Display list of themes that will be played
+            theme_names = []
+            for theme_idx in session.pack_themes:
+                if theme_idx < len(themes):
+                    theme_name = themes[theme_idx].get('name', f'Тема {theme_idx + 1}')
+                    theme_names.append(theme_name)
+            
+            if theme_names:
+                await bot.send_message(
+                    session.game_chat_id,
+                    messages.msg_themes_list(theme_names),
+                    parse_mode="HTML"
+                )
+                await wait_with_pause(session, 5)
         
         theme_idx = session.current_theme_idx
         
