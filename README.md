@@ -7,6 +7,7 @@ A Telegram bot for playing "Своя игра" (Russian Jeopardy!) with friends.
 - **Multiplayer games** — Create and join games in group chats
 - **Question packs** — Import question packs from PDF files
 - **Smart pack selection** — Automatically selects packs with unplayed themes for all players
+- **Partial question display** — Long questions can be revealed progressively in parts
 - **Game state machine** — Automated question flow with pause/resume support
 - **Score tracking** — Real-time score updates with correction support
 - **Player statistics** — ELO rating, win streaks, answer accuracy, and more
@@ -82,6 +83,7 @@ python bot.py
 | `/yes` | `да` | Confirm correct answer (score correction) |
 | `/no` | `нет` | Mark answer as incorrect (score correction) |
 | `/accidentally` | `случайно` | Mark accidental buzz-in |
+| `/partial_display` | `постепенный показ` | Toggle partial question display |
 
 ### Admin Commands
 

@@ -159,6 +159,7 @@ async def abort_all_command(message: types.Message, bot: Bot) -> None:
 
 
 @router.message(Command("kick_player"))
+@router.message(F.text.lower() == "кикнуть нахуй")
 async def kick_player_command(message: types.Message, bot: Bot) -> None:
     import asyncio
     from commands.answer import apply_kick_result
@@ -220,3 +221,33 @@ async def kick_player_command(message: types.Message, bot: Bot) -> None:
             await apply_kick_result(current_session, bot)
     
     asyncio.create_task(auto_apply_kick())
+
+
+@router.message(Command("partial_display"))
+@router.message(F.text.func(lambda t: t and t.lower() in ["постепенный показ", "постепенный показ вопроса", "постепенный показ вопросов"]))
+async def partial_display_command(message: types.Message) -> None:
+    """Toggle partial question display mode."""
+    user = message.from_user
+    if not user:
+        return
+    
+    chat_id = message.chat.id
+    session = session_manager.get(chat_id)
+    
+    if not session:
+        await message.answer("В этом чате нет активной игры.")
+        return
+    
+    # Toggle the setting
+    session.partial_display_enabled = not session.partial_display_enabled
+    
+    if session.partial_display_enabled:
+        await message.answer(
+            "✅ Постепенный показ вопросов включён.\n"
+            "Длинные вопросы будут отображаться частями."
+        )
+    else:
+        await message.answer(
+            "❌ Постепенный показ вопросов отключён.\n"
+            "Вопросы будут показываться полностью."
+        )

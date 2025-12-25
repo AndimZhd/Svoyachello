@@ -75,6 +75,11 @@ class GameSession:
     kicked_players: set[int] | None = None
     
     spectators: list[UUID] | None = None
+    
+    # Partial question display
+    partial_display_enabled: bool = False
+    current_question_parts: list[str] | None = None
+    current_part_index: int = 0
 
     @classmethod
     def create(

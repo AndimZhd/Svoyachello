@@ -6,6 +6,7 @@ from database import games
 import messages
 from .types import GameState, GameStatus, GameSession
 from .scoring import finalize_question_scores, show_current_scores
+from .partial_display import split_question_into_parts, should_display_partially
 
 
 async def wait_with_pause(session: GameSession, seconds: float) -> None:
@@ -113,11 +114,44 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
                 
                 short_theme_name = theme.get('name', f'Тема {theme_idx + 1}')
                 
-                question_msg = await bot.send_message(
-                    session.game_chat_id,
-                    messages.msg_question(cost, short_theme_name, question_text),
-                    parse_mode="HTML"
-                )
+                # Check if question should be displayed in parts
+                if session.partial_display_enabled and should_display_partially(question_text):
+                    # Split question into parts
+                    session.current_question_parts = split_question_into_parts(question_text)
+                    session.current_part_index = 0
+                    total_parts = len(session.current_question_parts)
+                    
+                    # Display first part
+                    first_part = session.current_question_parts[0]
+                    question_msg = await bot.send_message(
+                        session.game_chat_id,
+                        messages.msg_question_partial(cost, short_theme_name, first_part, 1, total_parts),
+                        parse_mode="HTML"
+                    )
+                    
+                    # Display remaining parts progressively
+                    # Each part already contains accumulated text, so just use it directly
+                    for part_idx in range(1, total_parts):
+                        await wait_with_pause(session, 0.5)  # Wait between parts
+                        session.current_part_index = part_idx
+                        current_part_text = session.current_question_parts[part_idx]
+                        
+                        # Edit message to show current accumulated text
+                        await bot.edit_message_text(
+                            chat_id=session.game_chat_id,
+                            message_id=question_msg.message_id,
+                            text=messages.msg_question_partial(cost, short_theme_name, current_part_text, part_idx + 1, total_parts),
+                            parse_mode="HTML"
+                        )
+                else:
+                    # Display question all at once (normal behavior)
+                    session.current_question_parts = None
+                    session.current_part_index = 0
+                    question_msg = await bot.send_message(
+                        session.game_chat_id,
+                        messages.msg_question(cost, short_theme_name, question_text),
+                        parse_mode="HTML"
+                    )
                 
                 session.current_question_message_id = question_msg.message_id
                 session.current_question_data = {**question, 'theme_name': short_theme_name}

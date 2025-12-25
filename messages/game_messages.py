@@ -22,6 +22,11 @@ def msg_question(cost: int, theme_name: str, question_text: str) -> str:
     return f"<b>{cost}. {theme_name}</b>\n\n{question_text}"
 
 
+def msg_question_partial(cost: int, theme_name: str, question_text: str, part: int, total: int) -> str:
+    """Format a partial question display with part indicator."""
+    return f"<b>{cost}. {theme_name}</b> <i>[{part}/{total}]</i>\n\n{question_text}"
+
+
 def msg_answer(answer: str, comment: str | None = None) -> str:
     message = f"<b>Ответ:</b> {answer}"
     if comment:

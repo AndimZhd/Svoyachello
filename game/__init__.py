@@ -27,6 +27,11 @@ from .end_game import (
     finalize_game,
 )
 
+from .partial_display import (
+    split_question_into_parts,
+    should_display_partially,
+)
+
 __all__ = [
     'GameState',
     'AnswerState',
@@ -42,4 +47,6 @@ __all__ = [
     'mark_answer_accidental',
     'apply_dispute_result',
     'finalize_game',
+    'split_question_into_parts',
+    'should_display_partially',
 ]
