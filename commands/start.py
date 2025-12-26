@@ -39,17 +39,49 @@ async def start_game(message: types.Message, bot: Bot) -> None:
         return
 
     themes_needed = game['number_of_themes']
-    available_packs = await packs.get_available_packs_for_players(game['players'], themes_needed)
+    selected_pack = None
     
-    if not available_packs:
-        await message.answer("Нет доступных паков с достаточным количеством тем для всех игроков.")
-        return
-    
-    selected_pack = random.choice(available_packs)
-    
-    selected_themes = selected_pack.available_theme_indices[:themes_needed]
-    
-    await games.assign_pack_to_game(chat_id, selected_pack.short_name, selected_themes)
+    # Check if a pack was pre-selected
+    if game['pack_short_name']:
+        # Try to use the pre-selected pack
+        selected_pack_data = await packs.get_pack_by_short_name(game['pack_short_name'])
+        if not selected_pack_data:
+            await message.answer(
+                f"❌ Пак '{game['pack_short_name']}' не найден.\n"
+            )
+            return
+        
+        # Verify the pack has enough available themes for all players
+        available_packs = await packs.get_available_packs_for_players(game['players'], themes_needed)
+        
+        # Find the pre-selected pack in available packs
+        for pack in available_packs:
+            if pack.short_name == game['pack_short_name']:
+                selected_pack = pack
+                break
+        
+        if selected_pack:
+            selected_themes = selected_pack.available_theme_indices[:themes_needed]
+            await games.assign_pack_to_game(chat_id, selected_pack.short_name, selected_themes)
+        else:
+            await message.answer(
+                f"❌ Пак '{game['pack_short_name']}' не имеет достаточно непройденных тем для всех игроков.\n"
+                f"Выберите другой пак с помощью /pack или сбросьте выбор командой /pack случайный"
+            )
+            return
+    else:
+        # No pack was pre-selected, choose randomly
+        available_packs = await packs.get_available_packs_for_players(game['players'], themes_needed)
+        
+        if not available_packs:
+            await message.answer("Нет доступных паков с достаточным количеством тем для всех игроков.")
+            return
+        
+        selected_pack = random.choice(available_packs)
+        
+        selected_themes = selected_pack.available_theme_indices[:themes_needed]
+        
+        await games.assign_pack_to_game(chat_id, selected_pack.short_name, selected_themes)
 
     game_chat = await game_chats.get_available_game_chat()
     if not game_chat:
