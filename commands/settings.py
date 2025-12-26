@@ -118,7 +118,7 @@ async def pack_list_command(message: types.Message) -> None:
     
     pack_lines = []
     for p in all_packs:
-        pack_lines.append(f"<b>{p['short_name']}</b> — {p['name']} ({p['number_of_themes']} тем)")
+        pack_lines.append(f"<code>{p['short_name']}</code> — {p['name']} ({p['number_of_themes']} тем)")
     
     await message.answer(
         "📦 <b>Доступные паки:</b>\n\n" + "\n".join(pack_lines),
