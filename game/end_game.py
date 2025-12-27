@@ -210,7 +210,7 @@ async def finalize_game(chat_id: int, bot: Bot, is_aborted: bool = False) -> Non
             if session.spectators:
                 await update_pack_history(session, pack['id'], session.spectators, up_to_current=True)
 
-        await asyncio.sleep(60)
+        await asyncio.sleep(20)
 
         await kick_users_from_game_chat(bot, game_chat_id, player_telegram_ids)
         await kick_users_from_game_chat(bot, game_chat_id, spectator_telegram_ids)
