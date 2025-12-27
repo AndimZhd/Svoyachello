@@ -114,6 +114,8 @@ async def pack_command(message: types.Message) -> None:
 
 @router.message(Command("pack_list"))
 @router.message(F.text.lower() == "паки")
+@require_not_game_chat
+@require_allowed_chat
 async def pack_list_command(message: types.Message) -> None:
     all_packs = await packs.get_all_packs()
     
