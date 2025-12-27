@@ -129,6 +129,7 @@ SYSTEM_PROMPT = """Ты эксперт по парсингу PDF файлов с
           "question": "текст вопроса с ЗАГЛАВНЫМИ местоимениями",
           "form": "местоимение/маркер из вопроса (ОН/ОНА/ЕГО/ИХ/город/столица и т.д.)",
           "answer": "сам ответ",
+          "source": "источник ответа (если указан)",
           "comment": "комментарий к ответу",
           "accept": ["альтернатива1", "альтернатива2"]  // опционально, если есть "Зачет:"
         }
@@ -146,6 +147,13 @@ SYSTEM_PROMPT = """Ты эксперт по парсингу PDF файлов с
 3. Сохраняй все ударения, специальные символы, форматирование
 4. Поддерживай белорусский язык ("Адказ:", "Каментар:")
 5. Если в вопросе несколько заглавных местоимений, выбирай основное (обычно последнее перед вопросительным знаком)
+6. ВСЕГДА ищи и добавляй "source" (источник ответа) если он указан в документе:
+   - Источник обычно после ответа в скобках: "(источник: ...)", "Источник: ...", "[...]"
+   - Если источника нет, можно опустить поле
+7. КРИТИЧНО: В JSON строках ОБЯЗАТЕЛЬНО экранируй:
+   - Кавычки: \\"
+   - Переводы строк: \\n
+   - Обратный слеш: \\\\
 
 Верни ТОЛЬКО валидный JSON, без markdown блоков и дополнительного текста."""
 
@@ -565,8 +573,24 @@ def extract_json_from_response(response_text: str):
         return json.loads(response_text)
     except json.JSONDecodeError as e:
         print(f"Error parsing JSON: {e}")
-        print(f"Response text (first 500 chars): {response_text[:500]}")
-        raise
+        print(f"Response text (first 1000 chars): {response_text[:1000]}")
+        print(f"Response text (last 500 chars): {response_text[-500:]}")
+
+        # Try to fix common JSON issues
+        print("Attempting to fix JSON...")
+
+        # Try using json.loads with strict=False (allows control characters)
+        try:
+            return json.loads(response_text, strict=False)
+        except:
+            pass
+
+        # Save problematic response for debugging
+        debug_path = Path("debug_response.txt")
+        debug_path.write_text(response_text, encoding='utf-8')
+        print(f"Full response saved to: {debug_path}")
+
+        raise ValueError(f"Failed to parse JSON. Saved full response to {debug_path}") from e
 
 def get_package_structure(uploaded_file=None, text_content: str = None, is_merged: bool = False) -> dict:
     """Get package metadata and theme names (first pass)"""
@@ -598,7 +622,8 @@ def get_package_structure(uploaded_file=None, text_content: str = None, is_merge
 - Если информация о пакете (info) НЕ найдена в документе, оставь пустой строкой: ""
 - Если название пакета (package_name) НЕ найдено, попробуй определить из содержимого (название файла, заголовки) или оставь пустой строкой: ""
 - НЕ выдумывай информацию, которой нет в документе
-- Верни ТОЛЬКО JSON"""
+- В JSON строках ОБЯЗАТЕЛЬНО экранируй кавычки как \\" и переводы строк как \\n
+- Верни ТОЛЬКО валидный JSON без синтаксических ошибок"""
 
     # Build contents based on mode (file or text)
     if text_content:
@@ -614,9 +639,37 @@ def get_package_structure(uploaded_file=None, text_content: str = None, is_merge
         contents=contents,
         config=types.GenerateContentConfig(
             temperature=0.1,
-            max_output_tokens=4096
+            max_output_tokens=8192  # Увеличено с 4096 до 8192
         )
     )
+
+    # Диагностика: проверяем response перед извлечением текста
+    if not response.text:
+        print("\n⚠️  ERROR: Response text is None!")
+        print(f"Response object: {response}")
+
+        # Проверяем причины
+        if hasattr(response, 'candidates') and response.candidates:
+            print(f"Number of candidates: {len(response.candidates)}")
+            for i, candidate in enumerate(response.candidates):
+                print(f"  Candidate {i}:")
+                if hasattr(candidate, 'finish_reason'):
+                    print(f"    Finish reason: {candidate.finish_reason}")
+                if hasattr(candidate, 'safety_ratings'):
+                    print(f"    Safety ratings: {candidate.safety_ratings}")
+                if hasattr(candidate, 'content'):
+                    print(f"    Has content: {candidate.content is not None}")
+
+        if hasattr(response, 'prompt_feedback'):
+            print(f"Prompt feedback: {response.prompt_feedback}")
+
+        raise ValueError(
+            "Response text is None. Possible causes:\n"
+            "1. Content was blocked by safety filters\n"
+            "2. Output exceeded max_output_tokens limit\n"
+            "3. API error occurred\n"
+            "Check the diagnostics above for details."
+        )
 
     return extract_json_from_response(response.text)
 
@@ -650,15 +703,18 @@ def parse_theme_questions(uploaded_file=None, text_content: str = None, theme_na
 
 Верни JSON массив вопросов:
 [
-  {{"cost": 10, "question": "...", "form": "он/она/его/город", "answer": "..."}},
-  {{"cost": 20, "question": "...", "form": "...", "answer": "..."}},
+  {{"cost": 10, "question": "...", "form": "он/она/его/город", "answer": "...", "source": "источник"}},
+  {{"cost": 20, "question": "...", "form": "...", "answer": "...", "source": "..."}},
   ...
 ]
 
 ВАЖНО:
 - Вопросы должны быть отсортированы по cost (10, 20, 30, 40, 50)
+- ВСЕГДА ищи и добавляй поле "source" (источник ответа) если оно указано в документе
+- Источник обычно находится после ответа в скобках или отдельной строкой (примеры: "(источник: ...)", "Источник: ...", "[...]")
 - Включай "comment" и "accept" только если они есть в PDF
-- Верни ТОЛЬКО JSON массив, без комментариев"""
+- В JSON строках ОБЯЗАТЕЛЬНО экранируй кавычки как \\" и переводы строк как \\n
+- Верни ТОЛЬКО валидный JSON массив без синтаксических ошибок"""
 
     # Build contents based on mode (file or text)
     if text_content:
@@ -677,6 +733,34 @@ def parse_theme_questions(uploaded_file=None, text_content: str = None, theme_na
             max_output_tokens=8192
         )
     )
+
+    # Диагностика: проверяем response перед извлечением текста
+    if not response.text:
+        print(f"\n⚠️  ERROR: Response text is None for theme: {theme_name}")
+        print(f"Response object: {response}")
+
+        # Проверяем причины
+        if hasattr(response, 'candidates') and response.candidates:
+            print(f"Number of candidates: {len(response.candidates)}")
+            for i, candidate in enumerate(response.candidates):
+                print(f"  Candidate {i}:")
+                if hasattr(candidate, 'finish_reason'):
+                    print(f"    Finish reason: {candidate.finish_reason}")
+                if hasattr(candidate, 'safety_ratings'):
+                    print(f"    Safety ratings: {candidate.safety_ratings}")
+                if hasattr(candidate, 'content'):
+                    print(f"    Has content: {candidate.content is not None}")
+
+        if hasattr(response, 'prompt_feedback'):
+            print(f"Prompt feedback: {response.prompt_feedback}")
+
+        raise ValueError(
+            f"Response text is None for theme '{theme_name}'. Possible causes:\n"
+            "1. Content was blocked by safety filters\n"
+            "2. Output exceeded max_output_tokens limit\n"
+            "3. API error occurred\n"
+            "Check the diagnostics above for details."
+        )
 
     result = extract_json_from_response(response.text)
 
@@ -836,13 +920,15 @@ def parse_pdf_with_gemini(file_path: str, chunked: bool = True, text_mode: bool 
 - "В ответе одно слово. ОНА" → form: "одним словом, она"
 
 JSON формат:
-{"info":"...", "package_name":"...", "themes":[{"name":"...","questions":[{"cost":10,"question":"...","form":"он/она/его/город","answer":"..."}]}]}
+{"info":"...", "package_name":"...", "themes":[{"name":"...","questions":[{"cost":10,"question":"...","form":"он/она/его/город","answer":"...","source":"источник"}]}]}
 
 ВАЖНО:
+- ВСЕГДА ищи и добавляй поле "source" (источник ответа) если оно указано
 - Опускай "comment" и "accept" если их нет
 - Если информация о пакете (info) НЕ найдена в документе, оставь пустой строкой: ""
 - Если название пакета (package_name) НЕ найдено, попробуй определить из содержимого или оставь пустой строкой: ""
 - НЕ выдумывай информацию, которой нет в документе
+- В JSON ОБЯЗАТЕЛЬНО экранируй кавычки (\\") и переводы строк (\\n)
 - Будь краток. Закрой все скобки!"""
 
     response = client.models.generate_content(
@@ -894,6 +980,44 @@ def validate_json_structure(data: dict) -> bool:
     print("✓ JSON structure validation passed")
     print(f"✓ All {sum(len(t['questions']) for t in data['themes'])} questions have 'form' field")
     return True
+
+def generate_short_name(text: str) -> str:
+    """Generate a short name (slug) from folder name or package name
+
+    Examples:
+        "Дровушки_2022" -> "дровушки2022"
+        "Дровушки 2022. Своя игра" -> "дровушки2022си"
+        "Лагерь_Блик_2024_ЭК" -> "лагерьблик2024эк"
+    """
+    import re
+    import unicodedata
+
+    # Remove accents and normalize
+    text = unicodedata.normalize('NFKD', text)
+
+    # Check if there's a dot separator (e.g., "Name. Subtitle")
+    if '.' in text:
+        parts = text.split('.', 1)
+        main_part = parts[0].strip()
+        subtitle = parts[1].strip() if len(parts) > 1 else ''
+
+        # Process main part: remove punctuation and spaces
+        main_part = re.sub(r'[^\w\s]', '', main_part)
+        main_part = main_part.lower().strip()
+        main_part = re.sub(r'[\s_]+', '', main_part)
+
+        # Process subtitle: take first letters of each word
+        if subtitle:
+            subtitle_words = re.sub(r'[^\w\s]', '', subtitle).split()
+            subtitle_initials = ''.join(word[0].lower() for word in subtitle_words if word)
+            return main_part + subtitle_initials
+        return main_part
+    else:
+        # No dot: simple processing
+        text = re.sub(r'[^\w\s]', '', text)
+        text = text.lower().strip()
+        text = re.sub(r'[\s_]+', '', text)
+        return text
 
 def main():
     import argparse
@@ -1005,6 +1129,27 @@ Examples:
         print(f"  Total questions: {sum(len(t['questions']) for t in result['themes'])}")
         if is_merged:
             print(f"  Merged DOCX saved: {file_path}")
+
+        # Generate append_pack.py command
+        print()
+        print("=" * 60)
+
+        # Generate short name from folder/file name
+        short_name = generate_short_name(input_path.name)
+
+        # Get package name from parsed result
+        package_name = result.get('package_name', '')
+
+        # Build the command
+        command = f"python3 scripts/append_pack.py {short_name} {output_path}"
+        if package_name:
+            command += f' --name "{package_name}"'
+
+        print("📋 Next step: Copy and run this command to add pack to database:")
+        print()
+        print(f"  {command}")
+        print()
+        print("=" * 60)
 
     except Exception as e:
         print(f"Error: {e}")
