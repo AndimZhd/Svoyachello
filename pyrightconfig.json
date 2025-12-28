@@ -8,7 +8,8 @@
         "database",
         "messages",
         "commands",
-        "game"
+        "game",
+        "middlewares"
     ],
     "exclude": [
         "lib",

@@ -4,6 +4,7 @@ from aiogram.filters import Command
 from commands import common
 from database import games, game_chats
 from game import GameStatus
+from middlewares import require_allowed_chat, require_not_game_chat
 
 router = Router()
 
@@ -11,6 +12,8 @@ router = Router()
 @router.message(Command("register"))
 @router.message(F.text == "++")
 @router.message(F.text.lower() == "го")
+@require_not_game_chat
+@require_allowed_chat
 async def register(message: types.Message) -> None:
     user = message.from_user
     if not user:
@@ -43,6 +46,8 @@ async def register(message: types.Message) -> None:
 @router.message(Command("unregister"))
 @router.message(F.text == "-")
 @router.message(F.text.lower() == "не го")
+@require_not_game_chat
+@require_allowed_chat
 async def unregister(message: types.Message) -> None:
     user = message.from_user
     if not user:

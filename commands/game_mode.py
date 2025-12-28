@@ -3,12 +3,15 @@ from aiogram.filters import Command
 
 from database import games
 from game import GameStatus
+from middlewares import require_allowed_chat, require_not_game_chat
 
 router = Router()
 
 
 @router.message(Command("make_private"))
 @router.message(F.text.lower() == "приватизировать")
+@require_not_game_chat
+@require_allowed_chat
 async def make_private(message: types.Message) -> None:
     chat_id = message.chat.id
     
@@ -30,6 +33,8 @@ async def make_private(message: types.Message) -> None:
 
 @router.message(Command("make_public"))
 @router.message(F.text.lower() == "деприватизировать")
+@require_not_game_chat
+@require_allowed_chat
 async def make_public(message: types.Message) -> None:
     chat_id = message.chat.id
     

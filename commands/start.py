@@ -6,6 +6,7 @@ from aiogram.types import BotCommand, BotCommandScopeChat
 
 from database import games, game_chats, players, packs
 from game import GameStatus
+from middlewares import require_allowed_chat, require_not_game_chat
 
 GAME_CHAT_COMMANDS = [
     BotCommand(command="answer", description="Ответить на вопрос"),
@@ -21,6 +22,8 @@ router = Router()
 
 @router.message(Command("start"))
 @router.message(F.text.lower() == "старт")
+@require_not_game_chat
+@require_allowed_chat
 async def start_game(message: types.Message, bot: Bot) -> None:
     user = message.from_user
     if not user:

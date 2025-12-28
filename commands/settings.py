@@ -6,6 +6,7 @@ from database import games, game_chats, packs
 from database.players import get_player_by_telegram_id
 from database.player_rights import ensure_player_rights
 from game import session_manager, GameStatus, finalize_game
+from middlewares import require_allowed_chat, require_not_game_chat
 
 router = Router()
 
@@ -19,6 +20,8 @@ async def is_spectator(chat_id: int, telegram_id: int) -> bool:
 
 @router.message(Command("themes"))
 @router.message(F.text.func(lambda t: t.lower().startswith("темы") if t else False))
+@require_not_game_chat
+@require_allowed_chat
 async def themes_command(message: types.Message) -> None:
     user = message.from_user
     if not user:
@@ -58,6 +61,8 @@ async def themes_command(message: types.Message) -> None:
 
 @router.message(Command("pack"))
 @router.message(F.text.func(lambda t: t.lower().startswith("пак ") if t else False))
+@require_not_game_chat
+@require_allowed_chat
 async def pack_command(message: types.Message) -> None:
     user = message.from_user
     if not user:
@@ -109,6 +114,8 @@ async def pack_command(message: types.Message) -> None:
 
 @router.message(Command("pack_list"))
 @router.message(F.text.lower() == "паки")
+@require_not_game_chat
+@require_allowed_chat
 async def pack_list_command(message: types.Message) -> None:
     all_packs = await packs.get_all_packs()
     
@@ -137,10 +144,10 @@ async def abort_command(message: types.Message, bot: Bot) -> None:
         return
     
     chat_id = message.chat.id
+
+    await message.answer("🛑 Игра отменена.")
     
     await finalize_game(chat_id, bot, is_aborted=True)
-    
-    await message.answer("🛑 Игра отменена.")
 
 
 @router.message(Command("abort_all"))
@@ -152,10 +159,11 @@ async def abort_all_command(message: types.Message, bot: Bot) -> None:
     rights = await ensure_player_rights(user.id)
     if not rights or not rights['can_abort_all']:
         return
-    
-    await session_manager.finalize_all(bot, is_aborted=True)
-    
+
     await message.answer("🗑 Все игры отменены.")
+
+    await session_manager.finalize_all(bot, is_aborted=True)
+
 
 
 @router.message(Command("kick_player"))
