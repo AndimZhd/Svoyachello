@@ -1061,18 +1061,60 @@ Examples:
     merged_file_path = None
 
     if args.folder or (input_path.exists() and input_path.is_dir()):
-        # Folder mode: merge DOCX files into one DOCX
+        # Folder mode: merge files
         print(f"Folder mode: processing {input_path}")
         print("-" * 60)
-        merged_docx_path = merge_folder_to_docx(str(input_path))
 
-        # Convert DOCX to PDF unless text mode is enabled
-        if text_mode:
-            print("Text mode: will extract plain text from DOCX...")
-            file_path = merged_docx_path
-        else:
-            print("Converting merged DOCX to PDF...")
-            file_path = convert_docx_to_pdf(merged_docx_path)
+        # Find PDF and DOCX files
+        pdf_files = sorted([f for f in input_path.glob('*.pdf')])
+        docx_files = sorted([f for f in input_path.glob('*.docx') if not f.name.startswith('~$')])
+
+        if not pdf_files and not docx_files:
+            print(f"❌ Error: No PDF or DOCX files found in {input_path}")
+            sys.exit(1)
+
+        print(f"Found {len(pdf_files)} PDF file(s) and {len(docx_files)} DOCX file(s)")
+
+        # Collect all PDFs (including converted from DOCX)
+        all_pdfs = []
+        temp_converted_pdfs = []
+
+        # Add existing PDF files
+        if pdf_files:
+            all_pdfs.extend(pdf_files)
+            print(f"  ✓ {len(pdf_files)} PDF file(s) ready")
+
+        # Convert DOCX files to PDF and add them
+        if docx_files:
+            print(f"  Converting {len(docx_files)} DOCX file(s) to PDF...")
+            for i, docx_file in enumerate(docx_files, 1):
+                print(f"    [{i}/{len(docx_files)}] Converting {docx_file.name}...")
+                try:
+                    converted_pdf = convert_docx_to_pdf(str(docx_file))
+                    converted_pdf_path = Path(converted_pdf)
+                    all_pdfs.append(converted_pdf_path)
+                    temp_converted_pdfs.append(converted_pdf_path)
+                    print(f"      ✓ Created: {converted_pdf_path.name}")
+                except Exception as e:
+                    print(f"      ⚠️  Failed to convert {docx_file.name}: {e}")
+                    print(f"      Skipping this file...")
+
+        if not all_pdfs:
+            print(f"❌ Error: No valid PDF files to process")
+            sys.exit(1)
+
+        # Sort all PDFs by name for consistent ordering
+        all_pdfs = sorted(all_pdfs, key=lambda p: p.name)
+
+        # Merge all PDFs into one
+        merged_pdf_name = f"{input_path.name}_merged.pdf"
+        merged_pdf_path = input_path / merged_pdf_name
+
+        print(f"\nMerging {len(all_pdfs)} PDF file(s) into one...")
+        merge_pdfs(all_pdfs, str(merged_pdf_path))
+        print(f"✓ Merged PDF created: {merged_pdf_path}")
+
+        file_path = str(merged_pdf_path)
         is_merged = True
     elif input_path.exists() and input_path.is_file():
         # Single file mode
