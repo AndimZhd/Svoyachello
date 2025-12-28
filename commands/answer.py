@@ -86,7 +86,12 @@ async def answer_command(message: types.Message, bot: Bot) -> None:
             pass
     
     player_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username or "Игрок"
-    await message.answer(gm.msg_player_answering(player_name))
+    
+    try:
+        await message.answer(gm.msg_player_answering(player_name))
+    except Exception:
+        # If we can't send the message, still proceed with the answer logic
+        pass
     
     key = (chat_id, user.id)
     
@@ -95,8 +100,12 @@ async def answer_command(message: types.Message, bot: Bot) -> None:
         if game_answers.cancel_answering(chat_id):
             if session.answered_players is not None:
                 session.answered_players[user.id] = AnswerState.INCORRECT
-            await bot.send_message(chat_id, gm.msg_time_up(player_name))
-            await restore_question_message(bot, chat_id, session)
+            try:
+                await bot.send_message(chat_id, gm.msg_time_up(player_name))
+                await restore_question_message(bot, chat_id, session)
+            except Exception:
+                # If message send fails, continue anyway
+                pass
         if key in _waiting_for_answer:
             del _waiting_for_answer[key]
     
