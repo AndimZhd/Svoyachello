@@ -13,20 +13,16 @@ from google.genai import types
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
 load_dotenv()
 
-# Configure Gemini API
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     print("Error: GEMINI_API_KEY environment variable not set")
     print("Please set it in .env file or with: export GEMINI_API_KEY='your-api-key'")
     sys.exit(1)
 
-# Create client
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# System prompt for parsing quiz PDFs
 SYSTEM_PROMPT = """Ты эксперт по парсингу PDF файлов с вопросами для игры "Своя игра" в формат JSON.
 
 ═══════════════════════════════════════════════════════════════
@@ -167,18 +163,13 @@ def format_duration(seconds: float) -> str:
 
 
 def convert_docx_to_pdf(docx_path: str) -> str:
-    """
-    Convert DOCX to PDF using LibreOffice (preferred) or python-docx + reportlab.
-    
-    Returns path to temporary PDF file.
-    """
+    """Convert DOCX to PDF using LibreOffice or python-docx + reportlab"""
     import tempfile
     import subprocess
     
     docx_path_obj = Path(docx_path)
     pdf_path = docx_path_obj.with_suffix('.pdf')
-    
-    # Try LibreOffice first (best quality, no Python dependencies)
+
     try:
         subprocess.run(
             ['libreoffice', '--headless', '--convert-to', 'pdf', '--outdir', str(docx_path_obj.parent), str(docx_path)],
@@ -190,8 +181,7 @@ def convert_docx_to_pdf(docx_path: str) -> str:
             return str(pdf_path)
     except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
         pass
-    
-    # Fallback: try using python-docx + reportlab (if available)
+
     try:
         from docx import Document
         from reportlab.lib.pagesizes import A4
@@ -207,21 +197,15 @@ def convert_docx_to_pdf(docx_path: str) -> str:
 
         doc = Document(docx_path)
 
-        # Register Unicode fonts for Cyrillic support
-        # Try to find and register a Unicode-compatible font
         font_registered = False
         font_name = None
 
-        # List of common Unicode fonts to try (in order of preference)
         fonts_to_try = [
-            # macOS fonts
             ('/System/Library/Fonts/Supplemental/Arial Unicode.ttf', 'ArialUnicode'),
             ('/System/Library/Fonts/Helvetica.ttc', 'Helvetica'),
             ('/Library/Fonts/Arial.ttf', 'Arial'),
-            # Linux fonts
             ('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 'DejaVuSans'),
             ('/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf', 'LiberationSans'),
-            # Windows fonts
             ('C:/Windows/Fonts/arial.ttf', 'Arial'),
             ('C:/Windows/Fonts/calibri.ttf', 'Calibri'),
         ]
@@ -239,18 +223,15 @@ def convert_docx_to_pdf(docx_path: str) -> str:
 
         if not font_registered:
             print("  ⚠ Warning: Could not register Unicode font, falling back to default (may not display Cyrillic properly)")
-            font_name = 'Helvetica'  # ReportLab default
+            font_name = 'Helvetica'
 
-        # Create PDF
         pdf_doc = SimpleDocTemplate(str(pdf_path), pagesize=A4,
                                     rightMargin=72, leftMargin=72,
                                     topMargin=72, bottomMargin=18)
 
-        # Container for the 'Flowable' objects
         elements = []
         styles = getSampleStyleSheet()
 
-        # Custom style for normal text with Unicode font (optimized spacing)
         normal_style = ParagraphStyle(
             'CustomNormal',
             parent=styles['Normal'],
@@ -261,7 +242,6 @@ def convert_docx_to_pdf(docx_path: str) -> str:
             alignment=TA_LEFT,
         )
 
-        # Custom style for headings with Unicode font (optimized spacing)
         heading_style = ParagraphStyle(
             'CustomHeading',
             parent=styles['Heading2'],
@@ -271,48 +251,38 @@ def convert_docx_to_pdf(docx_path: str) -> str:
             spaceAfter=6, # Reduced from 12
             alignment=TA_LEFT,
         )
-        
-        # Process paragraphs (skip empty ones to reduce PDF size)
+
         for para in doc.paragraphs:
             text = para.text.strip()
             if not text:
-                # Skip empty paragraphs completely (optimization)
                 continue
 
-            # Clean text and handle special characters
             text = text.replace('\n', '<br/>')
-            # Escape XML special chars for ReportLab
             text = text.replace('&', '&amp;')
             text = text.replace('<', '&lt;')
             text = text.replace('>', '&gt;')
 
-            # Check if paragraph is a heading (bold or larger font)
             is_heading = False
             if para.runs:
                 first_run = para.runs[0]
                 if first_run.bold or (first_run.font.size and first_run.font.size.pt > 12):
                     is_heading = True
 
-            # Use heading style for headings, normal for others
             style = heading_style if is_heading else normal_style
 
             try:
                 p = Paragraph(text, style)
                 elements.append(p)
-                # Reduced spacer for better density
                 if is_heading:
                     elements.append(Spacer(1, 3))
             except Exception as e:
-                # Fallback: simple text without formatting
                 try:
                     p = Paragraph(text.replace('<br/>', ' '), normal_style)
                     elements.append(p)
                 except:
-                    # Last resort: skip problematic paragraph
                     print(f"  ⚠ Warning: Could not add paragraph: {text[:50]}...")
                     pass
-        
-        # Build PDF
+
         pdf_doc.build(elements)
         
         if Path(pdf_path).exists() and Path(pdf_path).stat().st_size > 0:
@@ -338,63 +308,49 @@ def convert_docx_to_pdf(docx_path: str) -> str:
 
 
 def merge_docx(docx_files: list[Path], output_path: str) -> None:
-    """Объединяет несколько DOCX файлов в один"""
+    """Merge multiple DOCX files into one"""
     from docx import Document
-    
+
     if not docx_files:
         raise ValueError("No DOCX files to merge")
-    
-    # Создаём новый документ
+
     merged_doc = Document()
-    
+
     for i, docx_path in enumerate(docx_files):
         doc = Document(str(docx_path))
-        
-        # Добавляем разрыв страницы между файлами (кроме первого)
+
         if i > 0:
             merged_doc.add_page_break()
-        
-        # Копируем все параграфы с сохранением гиперссылок
+
         from docx.oxml import parse_xml
         from docx.oxml.ns import qn
-        
+
         for para in doc.paragraphs:
-            # Клонируем XML элемент параграфа
             para_xml_str = para._element.xml
             new_para_xml = parse_xml(para_xml_str)
-            
-            # Копируем relationships для гиперссылок
-            # Используем правильный namespace для поиска гиперссылок
+
             hyperlinks = new_para_xml.xpath('.//w:hyperlink')
             for hyperlink_elem in hyperlinks:
                 rel_id = hyperlink_elem.get(qn('r:id'))
                 if rel_id and rel_id in doc.part.rels:
                     source_rel = doc.part.rels[rel_id]
-                    # Проверяем, существует ли уже такой relationship в новом документе
                     existing_rel_id = None
                     for r_id, r in merged_doc.part.rels.items():
                         if r.target_ref == source_rel.target_ref:
                             existing_rel_id = r_id
                             break
-                    
+
                     if existing_rel_id:
-                        # Используем существующий relationship
                         hyperlink_elem.set(qn('r:id'), existing_rel_id)
                     else:
-                        # Гиперссылки обычно внешние, используем get_or_add_ext_rel
-                        # Это автоматически создаст или вернет существующий relationship
-                        # Метод возвращает строку (rId), а не объект Relationship
-                        new_rel_id = merged_doc.part.rels.get_or_add_ext_rel(
+                        new_rel = merged_doc.part.rels.get_or_add_ext_rel(
                             source_rel.reltype,
                             source_rel.target_ref
                         )
-                        # Обновляем rel_id в новом документе
-                        hyperlink_elem.set(qn('r:id'), new_rel_id)
-            
-            # Добавляем параграф в документ
+                        hyperlink_elem.set(qn('r:id'), new_rel.rId)
+
             merged_doc.element.body.append(new_para_xml)
-        
-        # Копируем таблицы
+
         for table in doc.tables:
             new_table = merged_doc.add_table(rows=len(table.rows), cols=len(table.columns))
             for i, row in enumerate(table.rows):
@@ -405,9 +361,8 @@ def merge_docx(docx_files: list[Path], output_path: str) -> None:
 
 
 def merge_pdfs(pdf_files: list[Path], output_path: str) -> None:
-    """Объединяет несколько PDF файлов в один"""
+    """Merge multiple PDF files into one"""
     try:
-        # Try pypdf 3.x (uses PdfWriter)
         from pypdf import PdfReader, PdfWriter
         
         writer = PdfWriter()
@@ -419,7 +374,6 @@ def merge_pdfs(pdf_files: list[Path], output_path: str) -> None:
             writer.write(output_file)
     except ImportError:
         try:
-            # Fallback to PyPDF2 (older API)
             from PyPDF2 import PdfMerger
             merger = PdfMerger()
             for pdf_path in pdf_files:
@@ -431,24 +385,16 @@ def merge_pdfs(pdf_files: list[Path], output_path: str) -> None:
 
 
 def merge_folder_to_docx(folder_path: str) -> str:
-    """
-    Объединяет все DOCX файлы из папки в один DOCX файл.
-    Сохраняет объединённый файл в папку.
-    
-    Returns:
-        Path to merged DOCX file
-    """
+    """Merge all DOCX files from folder into one"""
     folder = Path(folder_path)
 
-    # Найти все DOCX файлы (исключая временные файлы Office ~$*)
     docx_files = sorted([f for f in folder.glob('*.docx') if not f.name.startswith('~$')])
-    
+
     if not docx_files:
         raise ValueError(f"No DOCX files found in {folder_path}")
-    
+
     print(f"Found {len(docx_files)} DOCX files")
-    
-    # Создаём имя для объединённого файла
+
     merged_docx_name = f"{folder.name}_merged.docx"
     merged_docx_path = folder / merged_docx_name
     
@@ -512,8 +458,7 @@ def extract_text(file_path: str) -> str:
 def upload_file_to_gemini(file_path: str):
     """Upload file (PDF or DOCX) to Gemini"""
     file_path_obj = Path(file_path)
-    
-    # Determine MIME type
+
     if file_path_obj.suffix.lower() == '.pdf':
         mime_type = 'application/pdf'
         display_name = 'quiz_pack.pdf'
@@ -524,10 +469,9 @@ def upload_file_to_gemini(file_path: str):
         file_type = 'DOCX'
     else:
         raise ValueError(f"Unsupported file type: {file_path_obj.suffix}. Supported: PDF, DOCX")
-    
+
     print(f"Uploading {file_type}: {file_path_obj.name}")
 
-    # Upload file using file object to avoid Cyrillic path encoding issues
     with open(file_path, 'rb') as f:
         file = client.files.upload(
             file=f,
@@ -539,7 +483,6 @@ def upload_file_to_gemini(file_path: str):
 
     print(f"File uploaded: {file.name}")
 
-    # Wait for file to be processed
     while file.state == types.FileState.PROCESSING:
         print("Processing file...")
         time.sleep(2)
@@ -558,7 +501,6 @@ def extract_json_from_response(response_text: str):
 
     response_text = response_text.strip()
 
-    # Remove markdown code blocks if present
     if response_text.startswith("```json"):
         response_text = response_text[7:]
     elif response_text.startswith("```"):
@@ -576,16 +518,13 @@ def extract_json_from_response(response_text: str):
         print(f"Response text (first 1000 chars): {response_text[:1000]}")
         print(f"Response text (last 500 chars): {response_text[-500:]}")
 
-        # Try to fix common JSON issues
         print("Attempting to fix JSON...")
 
-        # Try using json.loads with strict=False (allows control characters)
         try:
             return json.loads(response_text, strict=False)
         except:
             pass
 
-        # Save problematic response for debugging
         debug_path = Path("debug_response.txt")
         debug_path.write_text(response_text, encoding='utf-8')
         print(f"Full response saved to: {debug_path}")
@@ -639,16 +578,14 @@ def get_package_structure(uploaded_file=None, text_content: str = None, is_merge
         contents=contents,
         config=types.GenerateContentConfig(
             temperature=0.1,
-            max_output_tokens=8192  # Увеличено с 4096 до 8192
+            max_output_tokens=8192
         )
     )
 
-    # Диагностика: проверяем response перед извлечением текста
     if not response.text:
         print("\n⚠️  ERROR: Response text is None!")
         print(f"Response object: {response}")
 
-        # Проверяем причины
         if hasattr(response, 'candidates') and response.candidates:
             print(f"Number of candidates: {len(response.candidates)}")
             for i, candidate in enumerate(response.candidates):
@@ -734,12 +671,10 @@ def parse_theme_questions(uploaded_file=None, text_content: str = None, theme_na
         )
     )
 
-    # Диагностика: проверяем response перед извлечением текста
     if not response.text:
         print(f"\n⚠️  ERROR: Response text is None for theme: {theme_name}")
         print(f"Response object: {response}")
 
-        # Проверяем причины
         if hasattr(response, 'candidates') and response.candidates:
             print(f"Number of candidates: {len(response.candidates)}")
             for i, candidate in enumerate(response.candidates):
@@ -764,7 +699,6 @@ def parse_theme_questions(uploaded_file=None, text_content: str = None, theme_na
 
     result = extract_json_from_response(response.text)
 
-    # Ensure we return a list
     if isinstance(result, list):
         return result
     elif isinstance(result, dict) and "questions" in result:
@@ -777,7 +711,6 @@ def parse_with_text_chunked(file_path: str, is_merged: bool = False) -> dict:
 
     total_start = time.time()
 
-    # Extract text from file
     extract_start = time.time()
     print(f"Extracting text from: {Path(file_path).name}")
     text_content = extract_text(file_path)
@@ -785,7 +718,6 @@ def parse_with_text_chunked(file_path: str, is_merged: bool = False) -> dict:
     print(f"  ⏱ Text extraction took: {format_duration(extract_duration)}")
     print(f"  Text length: {len(text_content)} chars")
 
-    # Step 1: Get package structure
     structure_start = time.time()
     structure = get_package_structure(text_content=text_content, is_merged=is_merged)
     structure_duration = time.time() - structure_start
@@ -795,8 +727,6 @@ def parse_with_text_chunked(file_path: str, is_merged: bool = False) -> dict:
         raise ValueError("Failed to extract themes from text")
 
     print(f"Found {len(structure['themes'])} themes")
-
-    # Step 2: Parse each theme's questions
     print(f"Step 2/2: Parsing questions for each theme...")
 
     themes_start = time.time()
@@ -814,7 +744,6 @@ def parse_with_text_chunked(file_path: str, is_merged: bool = False) -> dict:
     themes_duration = time.time() - themes_start
     total_duration = time.time() - total_start
 
-    # Print timing summary
     print()
     print("=" * 50)
     print("⏱ TIMING SUMMARY (TEXT MODE):")
@@ -836,13 +765,11 @@ def parse_pdf_with_gemini_chunked(file_path: str, is_merged: bool = False) -> di
 
     total_start = time.time()
 
-    # Upload file once
     upload_start = time.time()
     uploaded_file = upload_file_to_gemini(file_path)
     upload_duration = time.time() - upload_start
     print(f"  ⏱ Upload took: {format_duration(upload_duration)}")
 
-    # Step 1: Get package structure
     structure_start = time.time()
     structure = get_package_structure(uploaded_file, is_merged=is_merged)
     structure_duration = time.time() - structure_start
@@ -852,8 +779,6 @@ def parse_pdf_with_gemini_chunked(file_path: str, is_merged: bool = False) -> di
         raise ValueError("Failed to extract themes from PDF")
 
     print(f"Found {len(structure['themes'])} themes")
-
-    # Step 2: Parse each theme's questions
     print(f"Step 2/2: Parsing questions for each theme...")
 
     themes_start = time.time()
@@ -871,7 +796,6 @@ def parse_pdf_with_gemini_chunked(file_path: str, is_merged: bool = False) -> di
     themes_duration = time.time() - themes_start
     total_duration = time.time() - total_start
 
-    # Print timing summary
     print()
     print("=" * 50)
     print("⏱ TIMING SUMMARY (FILE MODE):")
@@ -905,7 +829,6 @@ def parse_pdf_with_gemini(file_path: str, chunked: bool = True, text_mode: bool 
     if chunked:
         return parse_pdf_with_gemini_chunked(file_path, is_merged=is_merged)
 
-    # Original single-shot approach (kept for compatibility)
     uploaded_file = upload_file_to_gemini(file_path)
 
     print("Parsing file with Gemini (single-shot mode)...")
@@ -982,38 +905,30 @@ def validate_json_structure(data: dict) -> bool:
     return True
 
 def generate_short_name(text: str) -> str:
-    """Generate a short name (slug) from folder name or package name
+    """Generate slug from folder/package name
 
-    Examples:
-        "Дровушки_2022" -> "дровушки2022"
-        "Дровушки 2022. Своя игра" -> "дровушки2022си"
-        "Лагерь_Блик_2024_ЭК" -> "лагерьблик2024эк"
+    Examples: "Дровушки_2022" -> "дровушки2022"
     """
     import re
     import unicodedata
 
-    # Remove accents and normalize
     text = unicodedata.normalize('NFKD', text)
 
-    # Check if there's a dot separator (e.g., "Name. Subtitle")
     if '.' in text:
         parts = text.split('.', 1)
         main_part = parts[0].strip()
         subtitle = parts[1].strip() if len(parts) > 1 else ''
 
-        # Process main part: remove punctuation and spaces
         main_part = re.sub(r'[^\w\s]', '', main_part)
         main_part = main_part.lower().strip()
         main_part = re.sub(r'[\s_]+', '', main_part)
 
-        # Process subtitle: take first letters of each word
         if subtitle:
             subtitle_words = re.sub(r'[^\w\s]', '', subtitle).split()
             subtitle_initials = ''.join(word[0].lower() for word in subtitle_words if word)
             return main_part + subtitle_initials
         return main_part
     else:
-        # No dot: simple processing
         text = re.sub(r'[^\w\s]', '', text)
         text = text.lower().strip()
         text = re.sub(r'[\s_]+', '', text)
@@ -1055,17 +970,12 @@ Examples:
     text_mode = args.text_mode
     is_merged = False
     merged_pdf_path = None
-
-    # Determine if input is folder or file
     file_path = None
-    merged_file_path = None
 
     if args.folder or (input_path.exists() and input_path.is_dir()):
-        # Folder mode: merge files
         print(f"Folder mode: processing {input_path}")
         print("-" * 60)
 
-        # Find PDF and DOCX files
         pdf_files = sorted([f for f in input_path.glob('*.pdf')])
         docx_files = sorted([f for f in input_path.glob('*.docx') if not f.name.startswith('~$')])
 
@@ -1075,16 +985,13 @@ Examples:
 
         print(f"Found {len(pdf_files)} PDF file(s) and {len(docx_files)} DOCX file(s)")
 
-        # Collect all PDFs (including converted from DOCX)
         all_pdfs = []
         temp_converted_pdfs = []
 
-        # Add existing PDF files
         if pdf_files:
             all_pdfs.extend(pdf_files)
             print(f"  ✓ {len(pdf_files)} PDF file(s) ready")
 
-        # Convert DOCX files to PDF and add them
         if docx_files:
             print(f"  Converting {len(docx_files)} DOCX file(s) to PDF...")
             for i, docx_file in enumerate(docx_files, 1):
@@ -1103,10 +1010,8 @@ Examples:
             print(f"❌ Error: No valid PDF files to process")
             sys.exit(1)
 
-        # Sort all PDFs by name for consistent ordering
         all_pdfs = sorted(all_pdfs, key=lambda p: p.name)
 
-        # Merge all PDFs into one
         merged_pdf_name = f"{input_path.name}_merged.pdf"
         merged_pdf_path = input_path / merged_pdf_name
 
@@ -1117,10 +1022,8 @@ Examples:
         file_path = str(merged_pdf_path)
         is_merged = True
     elif input_path.exists() and input_path.is_file():
-        # Single file mode
         file_path_str = str(input_path)
 
-        # If it's a DOCX file, convert to PDF unless text mode is enabled
         if input_path.suffix.lower() == '.docx' and not text_mode:
             print("Converting DOCX to PDF...")
             file_path = convert_docx_to_pdf(file_path_str)
@@ -1130,12 +1033,9 @@ Examples:
         print(f"Error: Path not found: {input_path}")
         sys.exit(1)
 
-    # Generate output path
     if is_merged:
-        # For folder: save in the folder itself
         output_path = input_path / f"{input_path.name}_parsed.json"
     else:
-        # For single file: save next to the file
         output_path = Path(file_path).parent / f"{Path(file_path).stem}_parsed.json"
     
     print(f"Input: {input_path}")
@@ -1148,14 +1048,11 @@ Examples:
     print("-" * 60)
 
     try:
-        # Parse file (PDF or DOCX)
         result = parse_pdf_with_gemini(file_path, chunked=chunked, text_mode=text_mode, is_merged=is_merged)
-        
-        # Save result FIRST (always save, even if validation fails)
+
         save_json(result, str(output_path))
         print()
-        
-        # Validate structure (after saving)
+
         validation_passed = validate_json_structure(result)
         
         if not validation_passed:
@@ -1172,17 +1069,13 @@ Examples:
         if is_merged:
             print(f"  Merged DOCX saved: {file_path}")
 
-        # Generate append_pack.py command
         print()
         print("=" * 60)
 
-        # Generate short name from folder/file name
         short_name = generate_short_name(input_path.name)
 
-        # Get package name from parsed result
         package_name = result.get('package_name', '')
 
-        # Build the command
         command = f"python3 scripts/append_pack.py {short_name} {output_path}"
         if package_name:
             command += f' --name "{package_name}"'
