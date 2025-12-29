@@ -2,6 +2,7 @@ import asyncio
 
 from aiogram import Bot, Router, types, F
 from aiogram.filters import Command
+from aiogram.types import ReplyKeyboardRemove
 
 from database.players import get_player_by_telegram_id
 from database.games import bulk_update_player_scores, get_game_scores
@@ -80,15 +81,21 @@ async def answer_command(message: types.Message, bot: Bot) -> None:
                 chat_id=chat_id,
                 message_id=session.current_question_message_id,
                 text=gm.msg_question_hidden(cost, form),
-                parse_mode="HTML"
+                parse_mode="HTML",
+                reply_markup=None  # Remove the keyboard from the question
             )
-        except Exception:
+        except Exception as e:
+            # Log the error for debugging
+            print(f"Failed to hide question: {e}")
             pass
     
     player_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username or "Игрок"
     
     try:
-        await message.answer(gm.msg_player_answering(player_name))
+        await message.answer(
+            gm.msg_player_answering(player_name),
+            reply_markup=ReplyKeyboardRemove()
+        )
     except Exception:
         # If we can't send the message, still proceed with the answer logic
         pass

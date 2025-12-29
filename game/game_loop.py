@@ -1,6 +1,7 @@
 import asyncio
 
 from aiogram import Bot
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 
 from database import games
 import messages
@@ -37,6 +38,10 @@ async def wait_for_answer_or_timeout(session: GameSession) -> bool:
         return False
     
     remaining = 15.0
+
+    total_players = len(session.players)
+    if session.spectators:
+        total_players = len([p for p in session.players if p not in session.spectators])
     
     while remaining > 0:
         if not session.pause_event.is_set():
@@ -44,6 +49,9 @@ async def wait_for_answer_or_timeout(session: GameSession) -> bool:
             continue
         
         if session.answer_event.is_set():
+            return True
+        
+        if session.answered_players and len(session.answered_players) >= total_players:
             return True
         
         if session.timer_extension > 0:
@@ -63,11 +71,14 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
         pack_info = session.pack_file.get('info', '')
         
         if pack_info and session.current_theme_idx == 0 and session.current_question_idx == 0:
-            await bot.send_message(
-                session.game_chat_id,
-                messages.msg_pack_info(pack_info),
-                parse_mode="HTML"
-            )
+            try:
+                await bot.send_message(
+                    session.game_chat_id,
+                    messages.msg_pack_info(pack_info),
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
             await wait_with_pause(session, 5)
             
             # Display list of themes that will be played
@@ -78,11 +89,14 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
                     theme_names.append(theme_name)
             
             if theme_names:
-                await bot.send_message(
-                    session.game_chat_id,
-                    messages.msg_themes_list(theme_names),
-                    parse_mode="HTML"
-                )
+                try:
+                    await bot.send_message(
+                        session.game_chat_id,
+                        messages.msg_themes_list(theme_names),
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
                 await wait_with_pause(session, 5)
         
         theme_idx = session.current_theme_idx
@@ -98,11 +112,14 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
             theme_name = theme.get('name', f'Тема {theme_idx + 1}')
             
             session.state = GameState.SHOWING_THEME
-            await bot.send_message(
-                session.game_chat_id,
-                messages.msg_theme_name(theme_name),
-                parse_mode="HTML"
-            )
+            try:
+                await bot.send_message(
+                    session.game_chat_id,
+                    messages.msg_theme_name(theme_name),
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
             await wait_with_pause(session, 7)
             
             questions = theme.get('questions', [])
@@ -121,13 +138,28 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
                     await show_current_scores(session, bot)
                     await wait_with_pause(session, 3)
                 
-                await bot.send_message(session.game_chat_id, messages.msg_attention_question())
-                await wait_with_pause(session, 2)
-                
                 cost = question.get('cost', (question_idx + 1) * 10)
                 question_text = question.get('question', '')
                 
                 short_theme_name = theme.get('name', f'Тема {theme_idx + 1}')
+                
+                # Create answer keyboard (reply keyboard on phone)
+                answer_keyboard = ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="+")]],
+                    resize_keyboard=True,
+                    one_time_keyboard=True
+                )
+                
+                # Show "Attention, question!" with the answer keyboard
+                try:
+                    await bot.send_message(
+                        session.game_chat_id,
+                        messages.msg_attention_question(),
+                        reply_markup=answer_keyboard
+                    )
+                except Exception:
+                    pass
+                await wait_with_pause(session, 2)
                 
                 # Check if question should be displayed in parts
                 if session.partial_display_enabled and should_display_partially(question_text):
@@ -138,11 +170,16 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
                     
                     # Display first part
                     first_part = session.current_question_parts[0]
-                    question_msg = await bot.send_message(
-                        session.game_chat_id,
-                        messages.msg_question_partial(cost, short_theme_name, first_part, 1, total_parts),
-                        parse_mode="HTML"
-                    )
+                    try:
+                        question_msg = await bot.send_message(
+                            session.game_chat_id,
+                            messages.msg_question_partial(cost, short_theme_name, first_part, 1, total_parts),
+                            parse_mode="HTML"
+                        )
+                    except Exception:
+                        # If question display fails, skip to next question
+                        question_idx += 1
+                        continue
                     
                     # Display remaining parts progressively
                     # Each part already contains accumulated text, so just use it directly
@@ -152,21 +189,29 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
                         current_part_text = session.current_question_parts[part_idx]
                         
                         # Edit message to show current accumulated text
-                        await bot.edit_message_text(
-                            chat_id=session.game_chat_id,
-                            message_id=question_msg.message_id,
-                            text=messages.msg_question_partial(cost, short_theme_name, current_part_text, part_idx + 1, total_parts),
-                            parse_mode="HTML"
-                        )
+                        try:
+                            await bot.edit_message_text(
+                                chat_id=session.game_chat_id,
+                                message_id=question_msg.message_id,
+                                text=messages.msg_question_partial(cost, short_theme_name, current_part_text, part_idx + 1, total_parts),
+                                parse_mode="HTML"
+                            )
+                        except Exception:
+                            pass
                 else:
                     # Display question all at once (normal behavior)
                     session.current_question_parts = None
                     session.current_part_index = 0
-                    question_msg = await bot.send_message(
-                        session.game_chat_id,
-                        messages.msg_question(cost, short_theme_name, question_text),
-                        parse_mode="HTML"
-                    )
+                    try:
+                        question_msg = await bot.send_message(
+                            session.game_chat_id,
+                            messages.msg_question(cost, short_theme_name, question_text),
+                            parse_mode="HTML"
+                        )
+                    except Exception:
+                        # If question display fails, skip to next question
+                        question_idx += 1
+                        continue
                 
                 session.current_question_message_id = question_msg.message_id
                 session.current_question_data = {**question, 'theme_name': short_theme_name}
@@ -192,7 +237,58 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
                 answer_text = question.get('answer', '')
                 comment = question.get('comment', '')
                 
-                await bot.send_message(session.game_chat_id, messages.msg_answer(answer_text, comment), parse_mode="HTML")
+                # Create score correction keyboard (reply keyboard on phone)
+                correction_keyboard = ReplyKeyboardMarkup(
+                    keyboard=[
+                        [
+                            KeyboardButton(text="да"),
+                            KeyboardButton(text="нет"),
+                            KeyboardButton(text="случ")
+                        ]
+                    ],
+                    resize_keyboard=True,
+                    one_time_keyboard=False  # Keep visible during correction phase
+                )
+                
+                # Remove keyboard after score correction
+                remove_keyboard = ReplyKeyboardRemove()
+                
+                if session.answered_players:
+                    try:
+                        await bot.send_message(
+                            session.game_chat_id,
+                            messages.msg_answer(answer_text, comment),
+                            parse_mode="HTML",
+                            reply_markup=correction_keyboard
+                        )
+                    except Exception:
+                        # If answer display fails, try without HTML parsing
+                        try:
+                            await bot.send_message(
+                                session.game_chat_id,
+                                f"Ответ: {answer_text}",
+                                reply_markup=correction_keyboard
+                            )
+                        except Exception:
+                            pass
+                else:
+                    try:
+                        await bot.send_message(
+                            session.game_chat_id,
+                            messages.msg_answer(answer_text, comment),
+                            parse_mode="HTML",
+                            reply_markup=remove_keyboard
+                        )
+                    except Exception:
+                        # If answer display fails, try without HTML parsing
+                        try:
+                            await bot.send_message(
+                                session.game_chat_id,
+                                f"Ответ: {answer_text}",
+                                reply_markup=remove_keyboard
+                            )
+                        except Exception:
+                            pass
                 
                 if session.answered_players:
                     session.state = GameState.SCORE_CORRECTION
