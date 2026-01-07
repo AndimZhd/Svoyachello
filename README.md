@@ -153,4 +153,4 @@ The parser expects packs in this format:
 
 ## License
 
-Huyaicense
+[THE BEER-WARE LICENSE](LICENSE)
