@@ -471,10 +471,17 @@ async def handle_answer_text(message: types.Message, bot: Bot) -> None:
         session.answered_players[user.id] = AnswerState.CORRECT if is_correct else AnswerState.INCORRECT
     
     player_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username or "Игрок"
+
+    from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+    answer_keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="+")]],
+        resize_keyboard=False,
+        one_time_keyboard=True
+    )
     
     if is_correct:
         await message.answer(gm.msg_correct_answer(player_name))
     else:
-        await message.answer(gm.msg_incorrect_answer(player_name))
+        await message.answer(gm.msg_incorrect_answer(player_name), reply_markup=answer_keyboard)
     
     await restore_question_message(bot, chat_id, session)

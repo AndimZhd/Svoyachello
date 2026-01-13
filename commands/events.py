@@ -74,7 +74,7 @@ async def on_player_joined(event: ChatMemberUpdated, bot: Bot) -> None:
                     return
         
         await games.add_player_to_game(game['chat_id'], db_player['id'])
-        session_manager.add_player(chat_id, db_player['id'])
+        await session_manager.add_player_with_pauses(chat_id, db_player['id'], user.id)
         return
     
     if status != GameStatus.STARTING.value:

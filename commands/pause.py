@@ -1,8 +1,9 @@
 from aiogram import Router, types, F
 from aiogram.filters import Command
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 
 from database.game_chats import get_game_by_game_chat
-from database.player_rights import ensure_player_rights, decrement_pauses
+from database.player_rights import ensure_player_rights
 from game import session_manager, GameState
 
 router = Router()
@@ -34,15 +35,35 @@ async def pause_game(message: types.Message) -> None:
         await message.answer("Нельзя поставить на паузу во время вопроса.")
         return
     
-    rights = await ensure_player_rights(user.id)
-    if rights and rights['number_of_pauses'] <= 0:
+    # Check pauses from session (per-game pauses)
+    if session.player_pauses is None:
+        session.player_pauses = {}
+    
+    pauses_left = session.player_pauses.get(user.id, 5)  # Default to 5 if not found
+    
+    if pauses_left <= 0:
         await message.answer("Пошёл нахуй")
         return
     
     if session_manager.pause(chat_id):
-        if rights:
-            await decrement_pauses(user.id)
-        await message.answer("⏸ Игра приостановлена. Используйте /resume для продолжения.")
+        # Decrement pauses in session only
+        session.player_pauses[user.id] = pauses_left - 1
+        
+        # Create keyboard with продолжить, да, нет, случ
+        pause_keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [
+                    KeyboardButton(text="продолжить"),
+                    KeyboardButton(text="да"),
+                    KeyboardButton(text="нет"),
+                    KeyboardButton(text="случ")
+                ]
+            ],
+            resize_keyboard=False,
+            one_time_keyboard=False
+        )
+        
+        await message.answer("⏸ Игра приостановлена. Используйте /resume для продолжения.", reply_markup=pause_keyboard)
     else:
         await message.answer("Не удалось приостановить игру.")
 
@@ -60,6 +81,20 @@ async def resume_game(message: types.Message) -> None:
         return
     
     if session_manager.resume(chat_id):
-        await message.answer("▶️ Игра продолжается!")
+        # Create keyboard with да, нет, случ, пауза
+        resume_keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [
+                    KeyboardButton(text="да"),
+                    KeyboardButton(text="нет"),
+                    KeyboardButton(text="случ"),
+                    KeyboardButton(text="пауза")
+                ]
+            ],
+            resize_keyboard=False,
+            one_time_keyboard=False
+        )
+
+        await message.answer("▶️ Игра продолжается!", reply_markup=resume_keyboard)
     else:
         await message.answer("Не удалось возобновить игру.")

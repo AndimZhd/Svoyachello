@@ -80,6 +80,9 @@ class GameSession:
     partial_display_enabled: bool = False
     current_question_parts: list[str] | None = None
     current_part_index: int = 0
+    
+    # Pauses per game (per player telegram_id)
+    player_pauses: dict[int, int] | None = None
 
     @classmethod
     def create(

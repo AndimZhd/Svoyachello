@@ -81,23 +81,23 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
                 pass
             await wait_with_pause(session, 5)
             
-            # Display list of themes that will be played
-            theme_names = []
-            for theme_idx in session.pack_themes:
-                if theme_idx < len(themes):
-                    theme_name = themes[theme_idx].get('name', f'Тема {theme_idx + 1}')
-                    theme_names.append(theme_name)
-            
-            if theme_names:
-                try:
-                    await bot.send_message(
-                        session.game_chat_id,
-                        messages.msg_themes_list(theme_names),
-                        parse_mode="HTML"
-                    )
-                except Exception:
-                    pass
-                await wait_with_pause(session, 5)
+        # Display list of themes that will be played
+        theme_names = []
+        for idx, theme_idx in enumerate(session.pack_themes, 1):
+            if theme_idx < len(themes):
+                theme_name = themes[theme_idx].get('name', f'Тема {theme_idx + 1}')
+                theme_names.append(f"{idx}. {theme_name}")
+        
+        if theme_names:
+            try:
+                await bot.send_message(
+                    session.game_chat_id,
+                    messages.msg_themes_list(theme_names),
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+            await wait_with_pause(session, 5)
         
         theme_idx = session.current_theme_idx
         
@@ -111,11 +111,23 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
             theme = themes[pack_theme_index]
             theme_name = theme.get('name', f'Тема {theme_idx + 1}')
             
+            # Send message about remaining themes
+            themes_left = len(session.pack_themes) - theme_idx
+            try:
+                await bot.send_message(
+                    session.game_chat_id,
+                    f"Осталось тем: {themes_left}",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+            await wait_with_pause(session, 3)
+            
             session.state = GameState.SHOWING_THEME
             try:
                 await bot.send_message(
                     session.game_chat_id,
-                    messages.msg_theme_name(theme_name),
+                    messages.msg_theme_name(f"Тема {theme_idx + 1}: {theme_name}"),
                     parse_mode="HTML"
                 )
             except Exception:
@@ -146,7 +158,7 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
                 # Create answer keyboard (reply keyboard on phone)
                 answer_keyboard = ReplyKeyboardMarkup(
                     keyboard=[[KeyboardButton(text="+")]],
-                    resize_keyboard=True,
+                    resize_keyboard=False,
                     one_time_keyboard=True
                 )
                 
@@ -243,10 +255,11 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
                         [
                             KeyboardButton(text="да"),
                             KeyboardButton(text="нет"),
-                            KeyboardButton(text="случ")
+                            KeyboardButton(text="случ"),
+                            KeyboardButton(text="пауза")
                         ]
                     ],
-                    resize_keyboard=True,
+                    resize_keyboard=False,
                     one_time_keyboard=False  # Keep visible during correction phase
                 )
                 

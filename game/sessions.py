@@ -3,7 +3,7 @@ from uuid import UUID
 
 from aiogram import Bot
 
-from database import games, packs, game_chats
+from database import games, packs, game_chats, players, player_rights
 import messages
 from .types import GameState, GameSession
 
@@ -35,6 +35,13 @@ class SessionManager:
             await bot.send_message(game_chat_id, messages.msg_pack_not_found())
             return
         
+        # Get telegram_ids for all players
+        player_telegram_data = await players.get_players_telegram_ids(game['players'])
+        telegram_ids = [p['telegram_id'] for p in player_telegram_data]
+        
+        # Load pauses for all players
+        player_pauses = await player_rights.get_player_pauses_bulk(telegram_ids)
+        
         session = GameSession.create(
             game_chat_id=game_chat_id,
             origin_chat_id=origin_chat_id,
@@ -43,6 +50,9 @@ class SessionManager:
             players=game['players'],
             invite_link=game.get('invite_link'),
         )
+        
+        # Set player pauses
+        session.player_pauses = player_pauses
 
         self._sessions[game_chat_id] = session
         
@@ -104,6 +114,27 @@ class SessionManager:
         
         if session.player_start_theme_idx is not None:
             session.player_start_theme_idx[player_id] = session.current_theme_idx
+        
+        return True
+    
+    async def add_player_with_pauses(self, game_chat_id: int, player_id: UUID, telegram_id: int) -> bool:
+        """Add player and initialize their pause count."""
+        session = self._sessions.get(game_chat_id)
+        if not session:
+            return False
+        
+        if player_id in session.players:
+            return False
+        
+        session.players.append(player_id)
+        
+        if session.player_start_theme_idx is not None:
+            session.player_start_theme_idx[player_id] = session.current_theme_idx
+        
+        # Load and set pauses for new player
+        if session.player_pauses is not None:
+            pauses_data = await player_rights.get_player_pauses_bulk([telegram_id])
+            session.player_pauses[telegram_id] = pauses_data.get(telegram_id, 5)
         
         return True
     
