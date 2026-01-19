@@ -124,10 +124,11 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
             await wait_with_pause(session, 3)
             
             session.state = GameState.SHOWING_THEME
+            theme_comment = theme.get('theme_comment', '')
             try:
                 await bot.send_message(
                     session.game_chat_id,
-                    messages.msg_theme_name(f"Тема {theme_idx + 1}: {theme_name}"),
+                    messages.msg_theme_name(f"Тема {theme_idx + 1}: {theme_name}", theme_comment),
                     parse_mode="HTML"
                 )
             except Exception:
