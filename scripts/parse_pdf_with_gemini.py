@@ -119,6 +119,7 @@ SYSTEM_PROMPT = """Ты эксперт по парсингу PDF файлов с
   "themes": [
     {
       "name": "Название темы (Автор: Имя Фамилия)",
+      "theme_comment": "комментарий к теме, если есть в документе (НЕ выдумывать!)",
       "questions": [
         {
           "cost": 10,
@@ -622,7 +623,7 @@ def parse_theme_questions(uploaded_file=None, text_content: str = None, theme_na
   * И т.д.
 """ if is_merged else ""
 
-    prompt = f"""Извлеки ТОЛЬКО вопросы для темы "{theme_name}" (тема #{theme_index + 1} в пакете).
+    prompt = f"""Извлеки данные для темы "{theme_name}" (тема #{theme_index + 1} в пакете).
 
 ФОРМАТ ПОЛЯ "form" (маркер из вопроса, НЕ ответ!):
 - "ОН был профессором" → form: "он"
@@ -638,20 +639,24 @@ def parse_theme_questions(uploaded_file=None, text_content: str = None, theme_na
 
 {merged_note}
 
-Верни JSON массив вопросов:
-[
-  {{"cost": 10, "question": "...", "form": "он/она/его/город", "answer": "...", "source": "источник"}},
-  {{"cost": 20, "question": "...", "form": "...", "answer": "...", "source": "..."}},
-  ...
-]
+Верни JSON объект:
+{{
+  "theme_comment": "комментарий к теме, если есть в документе (НЕ выдумывай!)",
+  "questions": [
+    {{"cost": 10, "question": "...", "form": "он/она/его/город", "answer": "...", "source": "источник"}},
+    {{"cost": 20, "question": "...", "form": "...", "answer": "...", "source": "..."}},
+    ...
+  ]
+}}
 
 ВАЖНО:
+- theme_comment: добавляй ТОЛЬКО если в документе есть пояснение к теме (под названием). НЕ выдумывай!
 - Вопросы должны быть отсортированы по cost (10, 20, 30, 40, 50)
 - ВСЕГДА ищи и добавляй поле "source" (источник ответа) если оно указано в документе
 - Источник обычно находится после ответа в скобках или отдельной строкой (примеры: "(источник: ...)", "Источник: ...", "[...]")
 - Включай "comment" и "accept" только если они есть в PDF
 - В JSON строках ОБЯЗАТЕЛЬНО экранируй кавычки как \\" и переводы строк как \\n
-- Верни ТОЛЬКО валидный JSON массив без синтаксических ошибок"""
+- Верни ТОЛЬКО валидный JSON объект без синтаксических ошибок"""
 
     # Build contents based on mode (file or text)
     if text_content:
@@ -699,12 +704,13 @@ def parse_theme_questions(uploaded_file=None, text_content: str = None, theme_na
 
     result = extract_json_from_response(response.text)
 
+    # Handle both old format (list) and new format (dict with theme_comment and questions)
     if isinstance(result, list):
-        return result
+        return {"questions": result}
     elif isinstance(result, dict) and "questions" in result:
-        return result["questions"]
+        return result
     else:
-        raise ValueError(f"Expected list of questions, got {type(result)}")
+        raise ValueError(f"Expected dict with questions or list, got {type(result)}")
 
 def parse_with_text_chunked(file_path: str, is_merged: bool = False) -> dict:
     """Parse file using plain text extraction and Gemini API (faster, no file upload)"""
@@ -731,15 +737,24 @@ def parse_with_text_chunked(file_path: str, is_merged: bool = False) -> dict:
 
     themes_start = time.time()
     theme_times = []
+    failed_themes = []
 
     for i, theme in enumerate(structure["themes"]):
         theme_start = time.time()
         theme_name = theme.get("name", f"Theme {i+1}")
-        questions = parse_theme_questions(text_content=text_content, theme_name=theme_name, theme_index=i, is_merged=is_merged)
-        theme["questions"] = questions
-        theme_duration = time.time() - theme_start
-        theme_times.append(theme_duration)
-        print(f"    ✓ {len(questions)} questions parsed ({format_duration(theme_duration)})")
+        try:
+            result = parse_theme_questions(text_content=text_content, theme_name=theme_name, theme_index=i, is_merged=is_merged)
+            theme["questions"] = result.get("questions", [])
+            if result.get("theme_comment"):
+                theme["theme_comment"] = result["theme_comment"]
+            theme_duration = time.time() - theme_start
+            theme_times.append(theme_duration)
+            print(f"    ✓ {len(theme['questions'])} questions parsed ({format_duration(theme_duration)})")
+        except Exception as e:
+            theme["questions"] = []
+            failed_themes.append((i + 1, theme_name, str(e)))
+            print(f"    ⚠️ FAILED: {theme_name[:50]}... - {e}")
+            continue
 
     themes_duration = time.time() - themes_start
     total_duration = time.time() - total_start
@@ -754,6 +769,10 @@ def parse_with_text_chunked(file_path: str, is_merged: bool = False) -> dict:
         avg_theme = sum(theme_times) / len(theme_times)
         print(f"    Avg per theme:     {format_duration(avg_theme)}")
     print(f"  TOTAL:               {format_duration(total_duration)}")
+    if failed_themes:
+        print(f"  ⚠️ FAILED THEMES:    {len(failed_themes)}")
+        for num, name, err in failed_themes:
+            print(f"    - Theme {num}: {name[:40]}...")
     print("=" * 50)
     print()
 
@@ -783,15 +802,24 @@ def parse_pdf_with_gemini_chunked(file_path: str, is_merged: bool = False) -> di
 
     themes_start = time.time()
     theme_times = []
+    failed_themes = []
 
     for i, theme in enumerate(structure["themes"]):
         theme_start = time.time()
         theme_name = theme.get("name", f"Theme {i+1}")
-        questions = parse_theme_questions(uploaded_file, theme_name=theme_name, theme_index=i, is_merged=is_merged)
-        theme["questions"] = questions
-        theme_duration = time.time() - theme_start
-        theme_times.append(theme_duration)
-        print(f"    ✓ {len(questions)} questions parsed ({format_duration(theme_duration)})")
+        try:
+            result = parse_theme_questions(uploaded_file, theme_name=theme_name, theme_index=i, is_merged=is_merged)
+            theme["questions"] = result.get("questions", [])
+            if result.get("theme_comment"):
+                theme["theme_comment"] = result["theme_comment"]
+            theme_duration = time.time() - theme_start
+            theme_times.append(theme_duration)
+            print(f"    ✓ {len(theme['questions'])} questions parsed ({format_duration(theme_duration)})")
+        except Exception as e:
+            theme["questions"] = []
+            failed_themes.append((i + 1, theme_name, str(e)))
+            print(f"    ⚠️ FAILED: {theme_name[:50]}... - {e}")
+            continue
 
     themes_duration = time.time() - themes_start
     total_duration = time.time() - total_start
@@ -806,6 +834,10 @@ def parse_pdf_with_gemini_chunked(file_path: str, is_merged: bool = False) -> di
         avg_theme = sum(theme_times) / len(theme_times)
         print(f"    Avg per theme:     {format_duration(avg_theme)}")
     print(f"  TOTAL:               {format_duration(total_duration)}")
+    if failed_themes:
+        print(f"  ⚠️ FAILED THEMES:    {len(failed_themes)}")
+        for num, name, err in failed_themes:
+            print(f"    - Theme {num}: {name[:40]}...")
     print("=" * 50)
     print()
 
@@ -885,14 +917,24 @@ def validate_json_structure(data: dict) -> bool:
         return False
 
     missing_forms = []
+    empty_themes = []
     for theme_idx, theme in enumerate(data["themes"]):
         if "questions" not in theme:
             print(f"Error: Theme {theme_idx} missing 'questions' field")
             return False
 
+        if len(theme["questions"]) == 0:
+            empty_themes.append(f"Theme {theme_idx + 1}: {theme.get('name', 'Unknown')[:40]}...")
+            continue
+
         for q_idx, question in enumerate(theme["questions"]):
             if "form" not in question:
                 missing_forms.append(f"Theme {theme_idx}, Question {q_idx} (cost: {question.get('cost', '?')})")
+
+    if empty_themes:
+        print(f"⚠️ WARNING: {len(empty_themes)} theme(s) have no questions (failed to parse):")
+        for item in empty_themes:
+            print(f"  - {item}")
 
     if missing_forms:
         print("ERROR: Missing 'form' field in the following questions:")
@@ -900,8 +942,11 @@ def validate_json_structure(data: dict) -> bool:
             print(f"  - {item}")
         return False
 
+    total_questions = sum(len(t['questions']) for t in data['themes'])
     print("✓ JSON structure validation passed")
-    print(f"✓ All {sum(len(t['questions']) for t in data['themes'])} questions have 'form' field")
+    print(f"✓ All {total_questions} questions have 'form' field")
+    if empty_themes:
+        print(f"⚠️ Note: {len(empty_themes)} theme(s) were skipped due to parsing errors")
     return True
 
 def generate_short_name(text: str) -> str:
