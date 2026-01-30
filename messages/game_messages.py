@@ -15,7 +15,9 @@ def msg_themes_list(theme_names: list[str]) -> str:
     return f"📋 <b>Темы игры:</b>\n\n" + "\n".join(theme_names)
 
 
-def msg_theme_name(theme_name: str) -> str:
+def msg_theme_name(theme_name: str, comment: str = '') -> str:
+    if comment:
+        return f"📚 <b>{theme_name}</b>\n\n<b>Комментарий:</b> {comment}"
     return f"📚 <b>{theme_name}</b>"
 
 
