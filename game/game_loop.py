@@ -1,6 +1,8 @@
 import asyncio
+import logging
 
 from aiogram import Bot
+from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 
 from database import games
@@ -8,6 +10,10 @@ import messages
 from .types import GameState, GameStatus, GameSession
 from .scoring import finalize_question_scores, show_current_scores
 from .partial_display import split_question_into_parts, should_display_partially
+
+logger = logging.getLogger(__name__)
+
+_EDIT_INTERVAL: float = 1.0
 
 
 async def wait_with_pause(session: GameSession, seconds: float) -> None:
@@ -174,43 +180,60 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
                     pass
                 await wait_with_pause(session, 2)
                 
-                # Check if question should be displayed in parts
                 if session.partial_display_enabled and should_display_partially(question_text):
-                    # Split question into parts
                     session.current_question_parts = split_question_into_parts(question_text)
                     session.current_part_index = 0
                     total_parts = len(session.current_question_parts)
-                    
-                    # Display first part
+
                     first_part = session.current_question_parts[0]
+                    is_single_frame = total_parts == 1
                     try:
                         question_msg = await bot.send_message(
                             session.game_chat_id,
-                            messages.msg_question_partial(cost, short_theme_name, first_part, 1, total_parts),
+                            messages.msg_question_partial(
+                                cost, short_theme_name, first_part,
+                                is_final=is_single_frame,
+                            ),
                             parse_mode="HTML"
                         )
                     except Exception:
-                        # If question display fails, skip to next question
                         question_idx += 1
                         continue
-                    
-                    # Display remaining parts progressively
-                    # Each part already contains accumulated text, so just use it directly
+
                     for part_idx in range(1, total_parts):
-                        await wait_with_pause(session, 0.5)  # Wait between parts
+                        await wait_with_pause(session, _EDIT_INTERVAL)
                         session.current_part_index = part_idx
                         current_part_text = session.current_question_parts[part_idx]
-                        
-                        # Edit message to show current accumulated text
+                        is_final = part_idx == total_parts - 1
+
                         try:
                             await bot.edit_message_text(
                                 chat_id=session.game_chat_id,
                                 message_id=question_msg.message_id,
-                                text=messages.msg_question_partial(cost, short_theme_name, current_part_text, part_idx + 1, total_parts),
+                                text=messages.msg_question_partial(
+                                    cost, short_theme_name, current_part_text,
+                                    is_final=is_final,
+                                ),
                                 parse_mode="HTML"
                             )
-                        except Exception:
+                        except TelegramRetryAfter as e:
+                            await asyncio.sleep(e.retry_after)
+                            try:
+                                await bot.edit_message_text(
+                                    chat_id=session.game_chat_id,
+                                    message_id=question_msg.message_id,
+                                    text=messages.msg_question_partial(
+                                        cost, short_theme_name, current_part_text,
+                                        is_final=is_final,
+                                    ),
+                                    parse_mode="HTML"
+                                )
+                            except Exception:
+                                pass
+                        except TelegramBadRequest:
                             pass
+                        except Exception:
+                            logger.debug("edit_message_text failed during partial display", exc_info=True)
                 else:
                     # Display question all at once (normal behavior)
                     session.current_question_parts = None
