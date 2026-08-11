@@ -23,6 +23,9 @@ async def wait_with_pause(session: GameSession, seconds: float) -> None:
     
     remaining = seconds
     while remaining > 0:
+        if session.skip_theme_event and session.skip_theme_event.is_set():
+            return
+
         if not session.pause_event.is_set():
             await session.pause_event.wait()
         
@@ -50,6 +53,9 @@ async def wait_for_answer_or_timeout(session: GameSession) -> bool:
         total_players = len([p for p in session.players if p not in session.spectators])
     
     while remaining > 0:
+        if session.skip_theme_event and session.skip_theme_event.is_set():
+            return False
+
         if not session.pause_event.is_set():
             await session.pause_event.wait()
             continue
@@ -106,8 +112,19 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
             await wait_with_pause(session, 5)
         
         theme_idx = session.current_theme_idx
+
+        def advance_to_next_theme() -> None:
+            nonlocal theme_idx
+            session.current_question_idx = 0
+            theme_idx += 1
+            session.current_theme_idx = theme_idx
+            if session.skip_theme_event:
+                session.skip_theme_event.clear()
         
         while theme_idx < len(session.pack_themes):
+            if session.skip_theme_event:
+                session.skip_theme_event.clear()
+
             pack_theme_index = session.pack_themes[theme_idx]
             
             if pack_theme_index >= len(themes):
@@ -128,6 +145,10 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
             except Exception:
                 pass
             await wait_with_pause(session, 3)
+
+            if session.skip_theme_event and session.skip_theme_event.is_set():
+                advance_to_next_theme()
+                continue
             
             session.state = GameState.SHOWING_THEME
             theme_comment = theme.get('theme_comment', '')
@@ -140,11 +161,18 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
             except Exception:
                 pass
             await wait_with_pause(session, 7)
+
+            if session.skip_theme_event and session.skip_theme_event.is_set():
+                advance_to_next_theme()
+                continue
             
             questions = theme.get('questions', [])
             question_idx = session.current_question_idx if theme_idx == session.current_theme_idx else 0
             
             while question_idx < len(questions):
+                if session.skip_theme_event and session.skip_theme_event.is_set():
+                    break
+
                 session.state = GameState.SHOWING_QUESTION
 
                 question = questions[question_idx]
@@ -179,6 +207,9 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
                 except Exception:
                     pass
                 await wait_with_pause(session, 2)
+
+                if session.skip_theme_event and session.skip_theme_event.is_set():
+                    break
                 
                 if session.partial_display_enabled and should_display_partially(question_text):
                     session.current_question_parts = split_question_into_parts(question_text)
@@ -202,6 +233,9 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
 
                     for part_idx in range(1, total_parts):
                         await wait_with_pause(session, _EDIT_INTERVAL)
+                        if session.skip_theme_event and session.skip_theme_event.is_set():
+                            break
+
                         session.current_part_index = part_idx
                         current_part_text = session.current_question_parts[part_idx]
                         is_final = part_idx == total_parts - 1
@@ -234,6 +268,9 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
                             pass
                         except Exception:
                             logger.debug("edit_message_text failed during partial display", exc_info=True)
+
+                    if session.skip_theme_event and session.skip_theme_event.is_set():
+                        break
                 else:
                     # Display question all at once (normal behavior)
                     session.current_question_parts = None
@@ -268,6 +305,9 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
                 session.state = GameState.WAITING_ANSWER
 
                 answered = await wait_for_answer_or_timeout(session)
+
+                if session.skip_theme_event and session.skip_theme_event.is_set():
+                    break
                 
                 session.state = GameState.SHOWING_ANSWER
                 answer_text = question.get('answer', '')
@@ -330,18 +370,27 @@ async def game_loop(session: GameSession, bot: Bot) -> None:
                 if session.answered_players:
                     session.state = GameState.SCORE_CORRECTION
                     await wait_with_pause(session, 10)
+
+                    if session.skip_theme_event and session.skip_theme_event.is_set():
+                        break
                     
                     await finalize_question_scores(session, cost, bot)
                 else:
                     await wait_with_pause(session, 5)
+
+                    if session.skip_theme_event and session.skip_theme_event.is_set():
+                        break
                 
                 question_idx += 1
             
-            await show_current_scores(session, bot)
-            await wait_with_pause(session, 5)
-            
-            session.current_question_idx = 0
-            theme_idx += 1
+            theme_was_skipped = bool(
+                session.skip_theme_event and session.skip_theme_event.is_set()
+            )
+            if not theme_was_skipped:
+                await show_current_scores(session, bot)
+                await wait_with_pause(session, 5)
+
+            advance_to_next_theme()
         
         session.state = GameState.GAME_OVER
         await bot.send_message(session.game_chat_id, messages.msg_game_over())

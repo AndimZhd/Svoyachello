@@ -48,10 +48,15 @@ async def main() -> None:
         BotCommand(command="pack", description="Выбрать пак вопросов"),
         BotCommand(command="pack_list", description="Список паков"),
         BotCommand(command="make_private", description="Сделать игру приватной"),
+        BotCommand(command="make_public", description="Сделать игру публичной"),
         BotCommand(command="start", description="Начать игру"),
         BotCommand(command="player_info", description="Статистика игрока"),
         BotCommand(command="rating", description="Рейтинг игроков"),
         BotCommand(command="chat_rating", description="Рейтинг игроков чата"),
+        BotCommand(command="ban", description="Забанить пак"),
+        BotCommand(command="unban", description="Разбанить пак"),
+        BotCommand(command="banned_packs", description="Список забаненных паков"),
+        BotCommand(command="abort", description="Отменить текущую игру"),
     ]
     
     private_commands = [

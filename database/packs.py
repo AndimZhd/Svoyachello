@@ -71,10 +71,40 @@ async def get_player_pack_histories(player_ids: list) -> list[dict]:
         return []
     
     pool = Database.get_pool()
-    sql = Database.load_sql("packs/get_player_pack_histories.sql")
+    sql = Database.load_sql("packs/get_player_pack_histories_with_bans.sql")
     
     async with pool.acquire() as conn:
         rows = await conn.fetch(sql, player_ids)
+        return [dict(row) for row in rows]
+
+
+async def ban_pack(telegram_id: int, pack_id: UUID) -> dict | None:
+    """Ban a pack for a player. Returns the updated/created record."""
+    pool = Database.get_pool()
+    sql = Database.load_sql("packs/ban_pack.sql")
+    
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(sql, telegram_id, pack_id)
+        return dict(row) if row else None
+
+
+async def unban_pack(telegram_id: int, pack_id: UUID) -> dict | None:
+    """Unban a pack for a player. Returns the updated record or None if not found."""
+    pool = Database.get_pool()
+    sql = Database.load_sql("packs/unban_pack.sql")
+    
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(sql, telegram_id, pack_id)
+        return dict(row) if row else None
+
+
+async def get_banned_packs(telegram_id: int) -> list[dict]:
+    """Get all banned packs for a player. Returns list of pack info (short_name, name, pack_id)."""
+    pool = Database.get_pool()
+    sql = Database.load_sql("packs/get_banned_packs.sql")
+    
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(sql, telegram_id)
         return [dict(row) for row in rows]
 
 
@@ -135,6 +165,7 @@ def parse_themes_played(themes_str: str) -> set[int]:
 
 
 async def get_available_packs_for_players(player_ids: list, themes_needed: int = 6) -> list[AvailablePack]:
+    """Get available packs for players, excluding banned packs (for random selection)."""
     all_packs = await get_all_packs()
     if not all_packs:
         return []
@@ -142,12 +173,21 @@ async def get_available_packs_for_players(player_ids: list, themes_needed: int =
     histories = await get_player_pack_histories(player_ids)
     
     pack_player_history: dict[str, dict[str, set[int]]] = {}
+    pack_banned_by: dict[str, set[str]] = {}  # Track which players banned which packs
+    
     for h in histories:
         pack_id = str(h['pack_id'])
         player_id = str(h['player_id'])
+        
         if pack_id not in pack_player_history:
             pack_player_history[pack_id] = {}
         pack_player_history[pack_id][player_id] = parse_themes_played(h['themes_played'])
+        
+        # Track banned packs
+        if h.get('is_banned', False):
+            if pack_id not in pack_banned_by:
+                pack_banned_by[pack_id] = set()
+            pack_banned_by[pack_id].add(player_id)
     
     available_packs: list[AvailablePack] = []
     
@@ -156,6 +196,10 @@ async def get_available_packs_for_players(player_ids: list, themes_needed: int =
         total_themes = pack['number_of_themes']
         
         if total_themes == 0:
+            continue
+        
+        # Skip pack if any player has banned it
+        if pack_id in pack_banned_by:
             continue
         
         all_theme_indices = set(range(0, total_themes))
@@ -182,3 +226,39 @@ async def get_available_packs_for_players(player_ids: list, themes_needed: int =
     available_packs.sort(key=lambda p: p.available_themes_count, reverse=True)
     
     return available_packs
+
+
+async def check_pack_for_manual_selection(short_name: str, player_ids: list, themes_needed: int = 6) -> AvailablePack | None:
+    """Check if a manually selected pack has enough themes (ignores bans)."""
+    pack = await get_pack_by_short_name(short_name)
+    if not pack:
+        return None
+    
+    total_themes = pack['number_of_themes']
+    if total_themes == 0:
+        return None
+    
+    histories = await get_player_pack_histories(player_ids)
+    
+    themes_played_by_any: set[int] = set()
+    pack_id_str = str(pack['id'])
+    
+    for h in histories:
+        if str(h['pack_id']) == pack_id_str:
+            themes_played_by_any.update(parse_themes_played(h['themes_played']))
+    
+    all_theme_indices = set(range(0, total_themes))
+    available_themes = all_theme_indices - themes_played_by_any
+    
+    if len(available_themes) < themes_needed:
+        return None
+    
+    return AvailablePack(
+        id=pack['id'],
+        short_name=pack['short_name'],
+        name=pack['name'],
+        pack_file=pack['pack_file'],
+        number_of_themes=total_themes,
+        available_themes_count=len(available_themes),
+        available_theme_indices=sorted(available_themes)
+    )

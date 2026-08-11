@@ -102,7 +102,8 @@ CREATE TABLE IF NOT EXISTS player_rights (
     can_abort BOOLEAN DEFAULT TRUE NOT NULL,
     number_of_pauses INTEGER DEFAULT 5 NOT NULL,
     can_abort_all BOOLEAN DEFAULT FALSE NOT NULL,
-    can_correct BOOLEAN DEFAULT TRUE NOT NULL
+    can_correct BOOLEAN DEFAULT TRUE NOT NULL,
+    can_skip_theme BOOLEAN DEFAULT FALSE NOT NULL
 );
 
 -- Function to automatically update updated_at on any row change

@@ -48,6 +48,7 @@ class GameSession:
 
     task: asyncio.Task | None = None
     pause_event: asyncio.Event | None = None
+    skip_theme_event: asyncio.Event | None = None
 
     current_question_message_id: int | None = None
     current_question_data: dict | None = None
@@ -98,6 +99,7 @@ class GameSession:
         pause_event.set()
         
         answer_event = asyncio.Event()
+        skip_theme_event = asyncio.Event()
         
         player_start_theme_idx = {player_id: 0 for player_id in players}
         
@@ -109,6 +111,7 @@ class GameSession:
             players=players,
             pause_event=pause_event,
             answer_event=answer_event,
+            skip_theme_event=skip_theme_event,
             player_correct_answers={},
             player_wrong_answers={},
             player_abs_scores={},

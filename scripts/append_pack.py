@@ -49,7 +49,7 @@ def process_themes(themes: list[dict]) -> list[dict]:
     return themes
 
 
-def validate_json(data: dict) -> list[str]:
+def validate_json(data: dict, *, allow_incomplete_themes: bool = False) -> list[str]:
     """
     Validate the JSON structure.
     Returns a list of error messages (empty if valid).
@@ -86,7 +86,12 @@ def validate_json(data: dict) -> list[str]:
             errors.append(f"{theme_prefix}: 'questions' must be a list")
             continue
         
-        if len(questions) != QUESTIONS_PER_THEME:
+        if allow_incomplete_themes and not 1 <= len(questions) <= QUESTIONS_PER_THEME:
+            errors.append(
+                f"{theme_prefix}: expected 1-{QUESTIONS_PER_THEME} questions, "
+                f"got {len(questions)}"
+            )
+        elif not allow_incomplete_themes and len(questions) != QUESTIONS_PER_THEME:
             errors.append(
                 f"{theme_prefix}: expected {QUESTIONS_PER_THEME} questions, "
                 f"got {len(questions)}"
@@ -114,9 +119,13 @@ async def update_pack(short_name: str, pack_file: dict, number_of_themes: int) -
         return row is not None
 
 
-async def main():
+async def main(*, allow_incomplete_themes: bool = False):
     parser = argparse.ArgumentParser(
-        description='Append themes from JSON file to existing pack in database',
+        description=(
+            'Append themes with 1-5 questions from a JSON file to a pack'
+            if allow_incomplete_themes
+            else 'Append themes from JSON file to existing pack in database'
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Example:
@@ -147,7 +156,10 @@ Example:
     
     # Validate JSON
     print(f"📋 Validating {args.json_path}...")
-    errors = validate_json(new_data)
+    errors = validate_json(
+        new_data,
+        allow_incomplete_themes=allow_incomplete_themes,
+    )
     
     if errors:
         print(f"\n❌ Validation failed with {len(errors)} error(s):")

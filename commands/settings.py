@@ -5,7 +5,7 @@ from commands.common import send_game_info
 from database import games, game_chats, packs
 from database.players import get_player_by_telegram_id
 from database.player_rights import ensure_player_rights
-from game import session_manager, GameStatus, finalize_game
+from game import session_manager, GameState, GameStatus, finalize_game
 from middlewares import require_allowed_chat, require_not_game_chat
 
 router = Router()
@@ -259,3 +259,49 @@ async def partial_display_command(message: types.Message) -> None:
             "❌ Постепенный показ вопросов отключён.\n"
             "Вопросы будут показываться полностью."
         )
+
+
+@router.message(Command("skip_theme"))
+@router.message(F.text.lower() == "пропустить тему")
+async def skip_theme_command(message: types.Message) -> None:
+    """Skip the current theme if the player has permission."""
+    user = message.from_user
+    if not user:
+        return
+
+    rights = await ensure_player_rights(user.id)
+    if not rights or not rights.get('can_skip_theme', False):
+        await message.answer("У вас нет права пропускать темы.")
+        return
+
+    session = session_manager.get(message.chat.id)
+    if not session:
+        await message.answer("В этом чате нет активной игры.")
+        return
+
+    if session.state in (GameState.IDLE, GameState.GAME_OVER):
+        await message.answer("Сейчас нельзя пропустить тему.")
+        return
+
+    if session.state == GameState.PAUSED:
+        await message.answer("Сначала продолжите игру командой /resume.")
+        return
+
+    if session.current_theme_idx >= len(session.pack_themes) - 1:
+        await message.answer("Это последняя тема — следующей темы нет.")
+        return
+
+    if not session.skip_theme_event:
+        await message.answer("Не удалось пропустить тему.")
+        return
+
+    if session.skip_theme_event.is_set():
+        await message.answer("Тема уже пропускается.")
+        return
+
+    session.skip_theme_event.set()
+    session.state = GameState.SHOWING_THEME
+    if session.answer_event:
+        session.answer_event.set()
+
+    await message.answer("⏭ Текущая тема пропущена. Переходим к следующей.")
